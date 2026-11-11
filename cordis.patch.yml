@@ -1,0 +1,4 @@
+- insert:
+    - id: debrief
+      name: 'dsh-debrief'
+      config: {}

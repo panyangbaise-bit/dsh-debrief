@@ -1,0 +1,7 @@
+{
+  "title": "每日记忆压缩",
+  "prompt": "执行技能 debrief-compact：读取超窗未压缩的记忆候选 → 按 topic 分组（每批 ≤30 条）→ 生成带 docId 引用的结构化长期摘要 → debrief_memory_compact_write 幂等写回 → 决策类条目经 debrief_memory_add 沉淀。最后播报压缩统计（组数、覆盖 docId、写回 id/version）。",
+  "rrule": "DTSTART;TZID=Asia/Shanghai:20261110T023000\nRRULE:FREQ=DAILY",
+  "target": "new_once",
+  "order": 80
+}

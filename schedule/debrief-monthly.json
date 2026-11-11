@@ -1,0 +1,7 @@
+{
+  "title": "月度复盘",
+  "prompt": "执行技能 debrief-monthly：按技能步骤打包本月数据 → 对照长期记忆输出月度复盘 → 沉淀本月策略级决策（debrief_memory_add）→ debrief_report_create 写回（market=monthly）。",
+  "rrule": "DTSTART;TZID=Asia/Shanghai:20261201T090000\nRRULE:FREQ=MONTHLY;BYMONTHDAY=1",
+  "target": "new_once",
+  "order": 70
+}

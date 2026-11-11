@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Debrief · 持仓复盘",
+    "description": "通过 debrief 数据内核提供持仓、成交、监察表、选标搜索、报告与投资记忆；包含 13 个工具、5 个定时复盘技能、DSH Schedule 任务预置与复盘仪表盘页面。全部模型工作由 DSH agent 完成。"
+  },
+  "commands": {
+    "debrief-setup": "校验 debrief 内核并幂等注册全部定时复盘任务（盘后 ×4 市场 / 新闻 / 周复盘 / 月度 / 记忆压缩）"
+  }
+}

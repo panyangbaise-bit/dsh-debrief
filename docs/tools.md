@@ -1,0 +1,208 @@
+# Tools · 工具契约
+
+> English follows the Chinese section.
+
+所有工具与内核 CLI 同构：输出统一为 UTF-8 JSON envelope
+`{ ok: true, schemaVersion, data } | { ok: false, schemaVersion, error: { code, message } }`，
+非零退出码 + 错误对象。插件侧执行前校验必填参数、写工具再校验 payload 结构，
+校验失败返回 `DEBRIEF_ARGS`。
+
+## 只读工具（交互会话）
+
+### debrief_holdings · 持仓总览
+
+```json
+{
+  "status": "open ｜ 省略=全部"
+}
+```
+
+CLI：`debrief holdings --json [--status open]` → `{ asOf, currency, totalMarketValue, dayPnl, dayPnlPct, totalPnl, totalPnlPct, positions[] }`
+
+### debrief_transactions · 成交明细
+
+```json
+{ "ticker": "AAPL", "limit": 20, "offset": 0 }
+```
+
+CLI：`debrief transactions --json [--ticker X] [--limit N] [--offset N]` → `{ total, items[] }`
+
+### debrief_watchlist · 监察表
+
+无参数。CLI：`debrief watchlist --json` → `{ count, items[] }`
+
+### debrief_instruments · 选标搜索
+
+```json
+{ "market": "us|cn|hk|crypto", "query": "至少 2 字符" }
+```
+
+CLI：`debrief instruments search --market <m> --query <q> --json` → `{ query, market, source, items[] }`
+股票 = 本地目录 + 东财 suggest 兜底；加密 = CoinGecko。
+
+### debrief_report · 报告读取
+
+```json
+{ "id": "rpt-…", "market": "us|cn|hk|crypto" }
+```
+
+CLI：`debrief report latest --json` / `--id <id> --json` → `{ id, market, title, generatedAt, summary, fullText, metrics[], chart }`
+
+### debrief_memory · 记忆检索 / 压缩候选
+
+```json
+{ "query": "建仓理由" }
+{ "compactCandidates": true }
+```
+
+CLI：`debrief memory search --query <q> --json` →
+`{ query, items[] }`（长期摘要优先，带证据引用）；
+`compactCandidates: true` 映射 `debrief memory compact-candidates --json` →
+超窗未压缩候选（供 debrief-compact 技能）。
+
+### debrief_analyze · 盘后分析输入包
+
+```json
+{ "market": "us|cn|hk|crypto" }
+```
+
+CLI：`debrief analysis prepare --market <m> --json` → `{ market, preparedAt, jobId, inputs: { quotes[], news[], memoryCandidates[] }, guidance }`
+agent 基于输入包自行生成结论（内核无 LLM）。
+
+### debrief_jobs · 任务台账
+
+无参数。CLI：`debrief job list --json` → `{ items[] }`（kind/at/status/durationSec/errorCode）
+
+### debrief_dashboard · 仪表盘聚合
+
+```json
+{ "range": "30|90|200|365" }
+```
+
+CLI：`debrief dashboard --json [--range N]` → `{ kpis, series: { range, equity[], returns[] }, composition[], holdings[], watchlist[] }`
+
+### debrief_news · 新闻速览
+
+```json
+{ "market": "us|cn|hk|crypto", "limit": 20 }
+```
+
+CLI：`debrief news latest --json [--market X] [--limit N]` → `{ fetchedAt, items[] }`
+（内核 APScheduler 抓取原文，无摘要；摘要由 debrief-news 技能在会话内生成。）
+
+## 白名单写工具（仅定时 skill 会话）
+
+三个写工具 description 均注明「Whitelisted write tool for scheduled debrief
+skill sessions; every write is recorded in the kernel user_actions audit ledger」。
+写操作入内核 `user_actions` 审计、走幂等 job 状态机。交互会话的写（添加持仓/自选）是 v2 能力。
+
+### debrief_report_create
+
+```json
+{
+  "market": "us|cn|hk|crypto|weekly|monthly",
+  "title": "盘后分析 · 2026-11-11",
+  "summary": "一句话总结/关键变化/组合影响/操作信号",
+  "fullText": "可选",
+  "metrics": [{ "label": "波动率", "value": "18.6%" }],
+  "chart": { "title": "60 日走势", "unit": "", "points": [100, 101.2] },
+  "jobId": "debrief-job-2048"
+}
+```
+
+CLI：`debrief report create --json`（payload 走 stdin）→ `{ id, status }`
+
+### debrief_memory_compact_write
+
+```json
+{
+  "topic": "position-aapl-rationale",
+  "instruments": ["AAPL"],
+  "summary": "结论/理由/条件",
+  "evidenceRefs": [{ "docId": 12, "quote": "原文摘录" }],
+  "timeRange": { "from": "2026-03-01", "to": "2026-05-31" },
+  "confidence": "high|medium|low",
+  "caveats": "已知局限"
+}
+```
+
+CLI：`debrief memory compact-write --json`（stdin）→ `{ id, version }`（同 topic 自动 version+1）
+
+### debrief_memory_add
+
+```json
+{
+  "sourceType": "decision|trade|report|note|conversation",
+  "content": "决策原文 + 理由 + 条件",
+  "instruments": ["AAPL"],
+  "occurredAt": "2026-11-10T08:00:00Z"
+}
+```
+
+CLI：`debrief memory add --json`（stdin）→ `{ docId }`
+
+## 稳定错误码
+
+| 错误码                                | 含义                           |
+| ------------------------------------- | ------------------------------ |
+| `DEBRIEF_ARGS`                        | 参数缺失或 payload 不合 schema |
+| `DEBRIEF_TIMEOUT`                     | 内核调用超时                   |
+| `DEBRIEF_CLI_NOT_FOUND`               | 找不到 CLI（检查 cliPath）     |
+| `DEBRIEF_CLI_NOT_EXECUTABLE`          | CLI 不可执行                   |
+| `DEBRIEF_EXEC`                        | 内核执行失败                   |
+| `DEBRIEF_PARSE`                       | stdout 不是合法 JSON           |
+| `DEBRIEF_BAD_PAYLOAD`                 | envelope 结构未知              |
+| `DEBRIEF_OUTPUT_TOO_LARGE`            | stdout 超过 8MiB               |
+| `DEBRIEF_ABORTED`                     | 调用被取消                     |
+| `DEBRIEF_USAGE` / `DEBRIEF_NOT_FOUND` | 内核命令/记录不存在            |
+
+---
+
+## Read tools (interactive sessions)
+
+All tools mirror the kernel CLI. Output is a UTF-8 JSON envelope
+`{ ok: true, schemaVersion, data } | { ok: false, schemaVersion, error: { code, message } }`;
+failures carry a non-zero exit and a structured error object. The plugin checks
+required arguments before execution and validates write payloads against their
+shapes; violations return `DEBRIEF_ARGS`.
+
+| Tool                   | Parameters                             | CLI                                                                     |
+| ---------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| `debrief_holdings`     | `status?`                              | `holdings --json [--status open]`                                       |
+| `debrief_transactions` | `ticker?`, `limit?`, `offset?`         | `transactions --json [--ticker X] [--limit N] [--offset N]`             |
+| `debrief_watchlist`    | —                                      | `watchlist --json`                                                      |
+| `debrief_instruments`  | `market`, `query`                      | `instruments search --market <m> --query <q> --json`                    |
+| `debrief_report`       | `id?`, `market?`                       | `report latest --json` / `report --id <id> --json`                      |
+| `debrief_memory`       | `query` (or `compactCandidates: true`) | `memory search --query <q> --json` / `memory compact-candidates --json` |
+| `debrief_analyze`      | `market`                               | `analysis prepare --market <m> --json`                                  |
+| `debrief_jobs`         | —                                      | `job list --json`                                                       |
+| `debrief_dashboard`    | `range?`                               | `dashboard --json [--range N]`                                          |
+| `debrief_news`         | `market?`, `limit?`                    | `news latest --json [--market X] [--limit N]`                           |
+
+## Whitelisted write tools (scheduled skill sessions only)
+
+Each write tool description declares: “Whitelisted write tool for scheduled
+debrief skill sessions; every write is recorded in the kernel user_actions
+audit ledger.” Writes enter the kernel `user_actions` audit and the idempotent
+job state machine. Interactive writes (add holding / watchlist) are a v2 feature.
+
+| Tool                           | Payload → CLI (stdin JSON) → Result                                                                                                                              |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `debrief_report_create`        | `{ market, title, summary, fullText?, metrics?, chart?, jobId? }` → `report create --json` → `{ id, status }`                                                    |
+| `debrief_memory_compact_write` | `{ topic, instruments[], summary, evidenceRefs[{docId,quote?}], timeRange{from,to}, confidence?, caveats? }` → `memory compact-write --json` → `{ id, version }` |
+| `debrief_memory_add`           | `{ sourceType, content, instruments[], occurredAt? }` → `memory add --json` → `{ docId }`                                                                        |
+
+## Stable error codes
+
+| Code                                  | Meaning                                             |
+| ------------------------------------- | --------------------------------------------------- |
+| `DEBRIEF_ARGS`                        | Missing argument or payload not matching the schema |
+| `DEBRIEF_TIMEOUT`                     | Kernel call timed out                               |
+| `DEBRIEF_CLI_NOT_FOUND`               | CLI not found (check cliPath)                       |
+| `DEBRIEF_CLI_NOT_EXECUTABLE`          | CLI not executable                                  |
+| `DEBRIEF_EXEC`                        | Kernel execution failed                             |
+| `DEBRIEF_PARSE`                       | stdout is not valid JSON                            |
+| `DEBRIEF_BAD_PAYLOAD`                 | Unknown envelope structure                          |
+| `DEBRIEF_OUTPUT_TOO_LARGE`            | stdout exceeded 8 MiB                               |
+| `DEBRIEF_ABORTED`                     | Call cancelled                                      |
+| `DEBRIEF_USAGE` / `DEBRIEF_NOT_FOUND` | Unknown kernel command / record missing             |

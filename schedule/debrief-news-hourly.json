@@ -1,0 +1,7 @@
+{
+  "title": "每小时新闻摘要",
+  "prompt": "执行技能 debrief-news：debrief_news 读取内核最新抓取的新闻原文 → 筛选与组合/监察表相关的条目 → 压缩成要点播报（不写库、不扩展为分析结论）。无相关新闻时明确播报「无相关新闻」。",
+  "rrule": "DTSTART;TZID=Asia/Shanghai:20261110T000500\nRRULE:FREQ=HOURLY",
+  "target": "new_once",
+  "order": 50
+}

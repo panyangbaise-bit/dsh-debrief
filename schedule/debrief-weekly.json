@@ -1,0 +1,7 @@
+{
+  "title": "周复盘",
+  "prompt": "执行技能 debrief-weekly：按技能步骤打包本周持仓/成交/报告/任务台账 → 输出周复盘 → 把本周实际决策经 debrief_memory_add 沉淀（逐字引用、带 docId 引用）→ debrief_report_create 写回（market=weekly）。无新决策时明确写「本周无新决策」。",
+  "rrule": "DTSTART;TZID=Asia/Shanghai:20261114T090000\nRRULE:FREQ=WEEKLY;BYDAY=SA",
+  "target": "new_once",
+  "order": 60
+}

@@ -1,0 +1,7 @@
+{
+  "title": "盘后分析 · A股",
+  "prompt": "执行技能 debrief-after-market，市场 market=cn（A股）。按技能步骤完成：debrief_analyze 打包输入 → 生成结构化盘后结论 → debrief_report_create 写回内核（必传 prepare 返回的 jobId）→ debrief_jobs 核对状态。最后在会话内播报结论摘要。",
+  "rrule": "DTSTART;TZID=Asia/Shanghai:20261109T153000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+  "target": "new_once",
+  "order": 20
+}

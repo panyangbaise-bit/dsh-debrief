@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Debrief · portfolio review",
+    "description": "Holdings, trades, watchlist, instrument search, reports, and investment memory through the debrief data kernel: 13 tools, 5 scheduled review skills, DSH Schedule task presets, and a review dashboard page. All model work runs in the DSH agent."
+  },
+  "commands": {
+    "debrief-setup": "Validate the debrief kernel and idempotently register every scheduled review task (after-market ×4 markets / news / weekly / monthly / memory compaction)"
+  }
+}
