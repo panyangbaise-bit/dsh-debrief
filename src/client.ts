@@ -604,7 +604,7 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
 .dbr-swatch{width:8px;height:8px;border-radius:2px;flex:0 0 8px}
 .dbr-legend .pct{margin-left:auto;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
 .dbr-summary-line{font-size:12.5px;color:var(--dsw-alias-label-primary);margin-bottom:6px}
-.dbr-page{padding:18px 20px 32px;max-width:1180px;margin:0 auto;min-width:0;color:var(--dsw-alias-label-primary)}
+.dbr-page{height:100%;overflow-y:auto;box-sizing:border-box;overscroll-behavior:contain;padding:18px 20px 32px;max-width:1180px;margin:0 auto;min-width:0;color:var(--dsw-alias-label-primary)}
 .dbr-page-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .dbr-page-title{font-size:16px;font-weight:650;margin-right:auto}
 .dbr-chips{display:flex;gap:6px;flex-wrap:wrap}
