@@ -5,7 +5,9 @@
 ## 前提
 
 - DeepSeek Harness ≥ 0.2.2-rc.1（`dsh web` 或桌面版）
-- debrief 内核 CLI（真实内核 `debrief`，或仓库自带 mock：`mock/debrief.js`）
+- **安装即用**：内核已随插件内置（`kernel/wheels/`）。managed/auto 模式只需机器上有
+  **uv 或 Python ≥3.11**（自举隔离 venv，全程离线）；采集依赖（collectors）为可选项。
+  服务器部署走 external 模式指向外部内核 venv；本地演示可用仓库自带 mock（`mock/debrief.js`）。
 
 ## 安装
 
@@ -67,7 +69,11 @@ bash examples/demo.sh
 ## Prerequisites
 
 - DeepSeek Harness ≥ 0.2.2-rc.1 (`dsh web` or Desktop)
-- The debrief kernel CLI (real `debrief`, or the bundled mock at `mock/debrief.js`)
+- **Installs-and-runs**: the kernel ships inside the plugin (`kernel/wheels/`).
+  Managed/auto mode only needs **uv or Python ≥ 3.11** (offline bootstrap of an
+  isolated venv); collectors stay optional. Server deployments use external mode
+  against the external kernel venv; the bundled mock (`mock/debrief.js`) serves
+  local demos.
 
 ## Install
 

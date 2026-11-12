@@ -17,6 +17,7 @@
     "locale/*.json",
     "skills/*.md",
     "schedule/*.json",
+    "kernel/wheels",
     "mock/debrief.js",
     "cordis.patch.yml",
     "icon.svg",

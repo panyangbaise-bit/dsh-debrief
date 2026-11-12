@@ -83,12 +83,23 @@ bash examples/demo.sh
 
 ## Configuration / 配置
 
-| Field                  | Default                                    | Description / 说明                                               |
-| ---------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
-| `cliPath`              | `debrief`（或环境变量 `DEBRIEF_CLI_PATH`） | Kernel CLI path or PATH name / 内核 CLI 路径                     |
-| `timeoutMs`            | `15000`                                    | Per-call timeout / 单次调用超时                                  |
-| `enableSetup`          | `true`                                     | Register the `debrief-setup` command / 注册 `debrief-setup` 命令 |
-| `enableDashboardRoute` | `true`                                     | Serve `/api/debrief/dashboard` / 提供仪表盘只读路由              |
+| Field                  | Default                                         | Description / 说明                                                            |
+| ---------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `cliPath`              | 未设置（managed 自举；external 默认 `debrief`） | Kernel CLI path or PATH name / 内核 CLI 路径（external 模式）                 |
+| `kernelMode`           | `auto`                                          | `auto` 显式 cliPath 优先否则自举 / `external` 服务器部署 / `managed` 强制自举 |
+| `dataDir`              | `~/.dsh/debrief-runtime`                        | Bootstrap venv data directory / 自举 venv 数据目录                            |
+| `withCollectors`       | `false`                                         | Opt-in networked collectors extra / 可选联网安装采集依赖                      |
+| `timeoutMs`            | `15000`                                         | Per-call timeout / 单次调用超时                                               |
+| `enableSetup`          | `true`                                          | Register the `debrief-setup` command / 注册 `debrief-setup` 命令              |
+| `enableDashboardRoute` | `true`                                          | Serve `/api/debrief/dashboard` / 提供投资组合只读路由                         |
+
+**安装即用**：npm 包内置内核 slim wheel 与离线依赖轮子（`kernel/wheels/`，纯
+Python，约 2.6MB）。机器上有 **uv 或 Python ≥3.11** 时，首次使用（managed /
+auto 且未配置 cliPath）会自动在 `~/.dsh/debrief-runtime/` 自举隔离 venv，全部
+离线安装；采集依赖（collectors）为可选项。服务器部署沿用 external 模式指向
+外部 venv。**Installs-and-runs**: the package bundles the slim kernel wheel and
+its offline dependencies under `kernel/wheels/`; with uv or Python ≥3.11 the
+first managed use bootstraps an isolated venv offline; collectors stay optional.
 
 Full reference: [docs/configuration.md](docs/configuration.md) · 完整配置见 [docs/configuration.md](docs/configuration.md)。
 

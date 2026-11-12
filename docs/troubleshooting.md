@@ -39,6 +39,19 @@
 
 这是设计行为：3 个写工具只供定时 skill 会话使用；交互写（添加持仓/自选）是 v2 能力。
 
+## 内核自举失败（managed 模式）
+
+| 错误码                        | 含义                      | 处理                                                                                                              |
+| ----------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `DEBRIEF_NO_PYTHON`           | 找不到 uv 或 Python ≥3.11 | 安装 uv（`curl -LsSf https://astral.sh/uv/install.sh \| sh`）或 `brew install python@3.11`；重跑 `/debrief-setup` |
+| `DEBRIEF_NO_WHEEL`            | 插件包缺少内核轮子        | 更新插件；或改用 external 模式（`kernelMode: external` + `cliPath`）                                              |
+| `DEBRIEF_BOOTSTRAP`           | uv/pip 安装失败           | 删除 `~/.dsh/debrief-runtime/`（或配置的 dataDir）后重试；查看报错中摘录的 stderr                                 |
+| `DEBRIEF_KERNEL_INITIALIZING` | 另一进程正在自举          | 稍等片刻重试；超过 10 分钟会自动接管陈旧锁                                                                        |
+
+自举全程离线（`--no-index --find-links kernel/wheels`），不依赖网络；
+`withCollectors: true` 时才会联网安装采集依赖（失败不影响核心读写命令）。
+`/debrief-setup` 会先完成自举再注册任务，并输出内核状态。
+
 ## 登录/token 问题
 
 - token/cookie 丢失 = 实例权限丢失：重启 `dsh web` 轮换 token，重新登录。
@@ -91,6 +104,19 @@ Cards never retry on their own — ask the Agent to retry.
 
 By design: the 3 write tools are for scheduled skill sessions; interactive
 writes (add holding / watchlist) are a v2 feature.
+
+## Kernel bootstrap failures (managed mode)
+
+| Code                          | Meaning                               | Fix                                                                                                            |
+| ----------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `DEBRIEF_NO_PYTHON`           | No uv and no Python ≥ 3.11            | Install uv (`curl -LsSf https://astral.sh/uv/install.sh \| sh`) or Python ≥3.11; rerun `/debrief-setup`        |
+| `DEBRIEF_NO_WHEEL`            | Kernel wheel missing from the package | Update the plugin, or switch to external mode (`kernelMode: external` + `cliPath`)                             |
+| `DEBRIEF_BOOTSTRAP`           | uv/pip install failed                 | Remove `~/.dsh/debrief-runtime/` (or the configured dataDir) and retry; read the stderr excerpt in the message |
+| `DEBRIEF_KERNEL_INITIALIZING` | Another process is bootstrapping      | Retry shortly; stale locks are stolen after 10 minutes                                                         |
+
+The bootstrap is fully offline (`--no-index --find-links kernel/wheels`); only
+`withCollectors: true` touches the network (failures never block core commands).
+`/debrief-setup` bootstraps first, then registers tasks and prints kernel status.
 
 ## Login / token issues
 

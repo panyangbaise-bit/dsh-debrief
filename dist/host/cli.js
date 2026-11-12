@@ -7,6 +7,7 @@
  * canonical envelope, so a failed call is a structured value, never a throw.
  */
 import { spawn } from 'node:child_process';
+import { ensureKernel } from './kernel.js';
 const EXEC_ERROR_CODES = {
     ETIMEDOUT: 'DEBRIEF_TIMEOUT',
     ENOENT: 'DEBRIEF_CLI_NOT_FOUND',
@@ -42,6 +43,18 @@ export function normalizeEnvelope(value) {
     };
 }
 export function runCli(config, args, options = {}) {
+    return ensureKernel(config).then((kernel) => {
+        if (!kernel.ready) {
+            return {
+                ok: false,
+                schemaVersion: 1,
+                error: { code: kernel.errorCode ?? 'DEBRIEF_BOOTSTRAP', message: kernel.error ?? 'kernel is not ready' },
+            };
+        }
+        return runCliResolved(kernel.cliPath, kernel.prefixArgs, config, args, options);
+    });
+}
+function runCliResolved(cliPath, prefixArgs, config, args, options) {
     return new Promise((resolve) => {
         if (options.signal?.aborted) {
             resolve({ ok: false, schemaVersion: 1, error: { code: 'DEBRIEF_ABORTED', message: 'cancelled' } });
@@ -49,7 +62,7 @@ export function runCli(config, args, options = {}) {
         }
         let child;
         try {
-            child = spawn(config.cliPath, [...args, '--json'], {
+            child = spawn(cliPath, [...prefixArgs, ...args, '--json'], {
                 env: { ...process.env },
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
@@ -111,7 +124,7 @@ export function runCli(config, args, options = {}) {
                     message: timedOut
                         ? `kernel timed out after ${config.timeoutMs}ms`
                         : error.code === 'ENOENT'
-                            ? `kernel CLI not found at ${JSON.stringify(config.cliPath)}`
+                            ? `kernel CLI not found at ${JSON.stringify(cliPath)}`
                             : error.message,
                 },
             });

@@ -20,6 +20,7 @@ declare namespace NodeJS {
 declare const process: {
   env: NodeJS.ProcessEnv
   argv: string[]
+  platform: string
   stdin: {
     setEncoding(encoding: string): void
     on(event: string, listener: (...args: never[]) => void): unknown
@@ -57,6 +58,22 @@ declare module 'node:child_process' {
 declare module 'node:fs' {
   export function readFileSync(path: string, encoding: 'utf8'): string
   export function readdirSync(path: string): string[]
+  export function existsSync(path: string): boolean
+  export function mkdirSync(path: string, options?: unknown): void
+  export function rmSync(path: string, options?: unknown): void
+  export function writeFileSync(path: string, data: string): void
+  export function statSync(path: string): { size: number; mtimeMs: number }
+}
+
+declare module 'node:path' {
+  export function join(...segments: string[]): string
+  export function basename(path: string): string
+  export function dirname(path: string): string
+}
+
+declare module 'node:os' {
+  export function homedir(): string
+  export function tmpdir(): string
 }
 
 declare module 'node:url' {

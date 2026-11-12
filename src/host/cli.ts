@@ -7,6 +7,7 @@
  * canonical envelope, so a failed call is a structured value, never a throw.
  */
 import { spawn } from 'node:child_process'
+import { ensureKernel } from './kernel.js'
 import type { DebriefConfig } from './config.js'
 
 export interface EnvelopeOk {
@@ -65,6 +66,25 @@ export function runCli(
   args: readonly string[],
   options: { signal?: AbortSignal; stdin?: string } = {},
 ): Promise<Envelope> {
+  return ensureKernel(config).then((kernel) => {
+    if (!kernel.ready) {
+      return {
+        ok: false,
+        schemaVersion: 1,
+        error: { code: kernel.errorCode ?? 'DEBRIEF_BOOTSTRAP', message: kernel.error ?? 'kernel is not ready' },
+      } satisfies Envelope
+    }
+    return runCliResolved(kernel.cliPath, kernel.prefixArgs, config, args, options)
+  })
+}
+
+function runCliResolved(
+  cliPath: string,
+  prefixArgs: readonly string[],
+  config: DebriefConfig,
+  args: readonly string[],
+  options: { signal?: AbortSignal; stdin?: string },
+): Promise<Envelope> {
   return new Promise((resolve) => {
     if (options.signal?.aborted) {
       resolve({ ok: false, schemaVersion: 1, error: { code: 'DEBRIEF_ABORTED', message: 'cancelled' } })
@@ -72,7 +92,7 @@ export function runCli(
     }
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(config.cliPath, [...args, '--json'], {
+      child = spawn(cliPath, [...prefixArgs, ...args, '--json'], {
         env: { ...process.env },
         stdio: ['pipe', 'pipe', 'pipe'],
       })
@@ -133,7 +153,7 @@ export function runCli(
           message: timedOut
             ? `kernel timed out after ${config.timeoutMs}ms`
             : error.code === 'ENOENT'
-              ? `kernel CLI not found at ${JSON.stringify(config.cliPath)}`
+              ? `kernel CLI not found at ${JSON.stringify(cliPath)}`
               : error.message,
         },
       })

@@ -5,6 +5,37 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 版本由 [release-please](https://github.com/googleapis/release-please) 自动管理。
 
+## [Unreleased]
+
+### Added
+
+- Self-contained kernel distribution: `kernel/wheels/` bundles the slim kernel
+  wheel (`portfolio_agent_kernel-0.2.0-py3-none-any.whl`) plus its offline
+  dependency closure (sqlalchemy/requests/python-dotenv/certifi/
+  charset-normalizer/idna/urllib3/typing_extensions, pure-python wheels,
+  ~2.6MB). On first use in `kernelMode: managed` (or `auto` without an
+  explicit `cliPath`) the Host bootstraps an isolated venv into
+  `~/.dsh/debrief-runtime/` (Config `dataDir` overrides): `uv venv` when uv is
+  on PATH, else `python3.11|3.12|3.13 -m venv` (neither → structured
+  `DEBRIEF_NO_PYTHON`); then `pip install --no-index --find-links
+  <kernel/wheels> portfolio_agent_kernel` fully offline. A marker file caches
+  the wheel fingerprint and a mismatch rebuilds; a directory lock serializes
+  concurrent bootstraps (`DEBRIEF_KERNEL_INITIALIZING` on timeout). Bootstrap
+  output is captured separately and never pollutes the CLI envelope.
+- `ensureKernel` runs before every `runCli` call (zero overhead once ready);
+  `external` mode is the unchanged passthrough for server deployments.
+- `/debrief-setup` reports kernel status (mode/launcher/data dir/wheel) and
+  bootstraps first in managed mode; failures carry Chinese repair steps
+  (`DEBRIEF_NO_PYTHON` / `DEBRIEF_NO_WHEEL` / `DEBRIEF_BOOTSTRAP` /
+  `DEBRIEF_CLI_NOT_FOUND`).
+- Opt-in `withCollectors` installs the networked collectors extra after the
+  offline base (non-fatal on failure; defaults to off).
+- Tests: mode resolution, uv/python detection, wheel-dir resolution, marker
+  reuse/rebuild, lock timeout/stale-steal, structured error paths, runCli
+  prefix — all with mocked uv/python under a temp data dir, no network; plus a
+  real integration test that bootstraps the bundled wheel offline with uv and
+  runs the console script (skipped where uv is unavailable).
+
 ## [0.2.0] - 2026-11-12
 
 ### Added
