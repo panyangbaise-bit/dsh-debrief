@@ -132,10 +132,61 @@ const zh = {
     'error.DEBRIEF_ARGS': '参数错误',
     'error.DEBRIEF_OUTPUT_TOO_LARGE': '内核输出过大',
     'error.DEBRIEF_NETWORK': '网络请求失败',
-    'error.DEBRIEF_USAGE': '内核命令不存在',
+    'error.DEBRIEF_USAGE': '内核命令用法错误',
     'error.DEBRIEF_NOT_FOUND': '记录不存在',
     'error.DEBRIEF_ERROR': '内核错误',
     'error.TOOL_ERROR': '工具执行失败',
+    'error.DEBRIEF_CONFLICT': '冲突：记录已存在或已被并发修改',
+    'error.DEBRIEF_APPROVAL': '未获批准，写入被拒绝',
+    'error.DEBRIEF_APPROVAL_UNAVAILABLE': '审批不可用，写入被拒绝',
+    'edit.addHolding': '+ 添加持仓',
+    'edit.addWatch': '+ 添加自选',
+    'edit.holding': '持仓',
+    'edit.watch': '自选',
+    'edit.add': '添加',
+    'edit.update': '更新',
+    'edit.remove': '删除',
+    'edit.modalAddHolding': '添加持仓',
+    'edit.modalEditHolding': '编辑持仓',
+    'edit.modalAddWatch': '添加自选',
+    'edit.modalEditWatch': '编辑自选',
+    'edit.market': '市场',
+    'edit.searchLabel': '搜索标的',
+    'edit.searchPlaceholder': '输入代码 / 名称 / 拼音',
+    'edit.searching': '搜索中…',
+    'edit.searchEmpty': '没有匹配的标的，换个关键词试试',
+    'edit.searchError': '搜索失败，请稍后重试',
+    'edit.searchHint': '在结果中选择标的后填写表单',
+    'edit.held': '已持有',
+    'edit.quantity': '数量',
+    'edit.cost': '成本价',
+    'edit.targetPrice': '关注价',
+    'edit.alert': '提醒',
+    'edit.alertOn': '开',
+    'edit.alertOff': '关',
+    'edit.submit': '提交',
+    'edit.cancel': '取消',
+    'edit.confirmDeleteTitle': '确认删除',
+    'edit.confirmDelete': '确认删除 {symbol}？该写操作会进入内核 user_actions 审计。',
+    'edit.confirmDeleteAction': '确认删除',
+    'edit.confirmBar': '再次点击确认删除',
+    'edit.savedToast': '已写入内核（user_actions 审计）',
+    'edit.writeFailed': '写入失败',
+    'edit.invalidQuantity': '请输入有效数量',
+    'edit.invalidCost': '请输入有效成本价',
+    'edit.invalidTarget': '请输入有效关注价',
+    'edit.needSelection': '请先从搜索结果中选择标的',
+    'edit.needQuantity': '请输入数量',
+    'edit.needCost': '请输入成本价',
+    'edit.reselect': '重新选择',
+    'edit.closing': '写入中…',
+    'edit.holdingAdded': '持仓已添加',
+    'edit.holdingUpdated': '持仓已更新',
+    'edit.holdingRemoved': '持仓已删除',
+    'edit.watchAdded': '自选已添加',
+    'edit.watchUpdated': '自选已更新',
+    'edit.watchRemoved': '自选已删除',
+    'edit.audited': '已入内核 user_actions 审计',
 };
 const en = {
     'mkt.us': 'US stocks',
@@ -255,10 +306,61 @@ const en = {
     'error.DEBRIEF_ARGS': 'Invalid arguments',
     'error.DEBRIEF_OUTPUT_TOO_LARGE': 'Kernel output too large',
     'error.DEBRIEF_NETWORK': 'Network request failed',
-    'error.DEBRIEF_USAGE': 'Unknown kernel command',
+    'error.DEBRIEF_USAGE': 'Kernel command usage error',
     'error.DEBRIEF_NOT_FOUND': 'Record not found',
     'error.DEBRIEF_ERROR': 'Kernel error',
     'error.TOOL_ERROR': 'Tool execution failed',
+    'error.DEBRIEF_CONFLICT': 'Conflict: the record already exists or was modified concurrently',
+    'error.DEBRIEF_APPROVAL': 'Not approved — write refused',
+    'error.DEBRIEF_APPROVAL_UNAVAILABLE': 'Approval unavailable — write refused',
+    'edit.addHolding': '+ Add holding',
+    'edit.addWatch': '+ Add watch',
+    'edit.holding': 'Holding',
+    'edit.watch': 'Watch',
+    'edit.add': 'Add',
+    'edit.update': 'Update',
+    'edit.remove': 'Remove',
+    'edit.modalAddHolding': 'Add holding',
+    'edit.modalEditHolding': 'Edit holding',
+    'edit.modalAddWatch': 'Add to watchlist',
+    'edit.modalEditWatch': 'Edit watchlist entry',
+    'edit.market': 'Market',
+    'edit.searchLabel': 'Search instrument',
+    'edit.searchPlaceholder': 'Code, name, or pinyin',
+    'edit.searching': 'Searching…',
+    'edit.searchEmpty': 'No matches — try another keyword',
+    'edit.searchError': 'Search failed, try again later',
+    'edit.searchHint': 'Pick an instrument from the results, then fill the form',
+    'edit.held': 'Held',
+    'edit.quantity': 'Quantity',
+    'edit.cost': 'Cost',
+    'edit.targetPrice': 'Target price',
+    'edit.alert': 'Alert',
+    'edit.alertOn': 'On',
+    'edit.alertOff': 'Off',
+    'edit.submit': 'Submit',
+    'edit.cancel': 'Cancel',
+    'edit.confirmDeleteTitle': 'Confirm removal',
+    'edit.confirmDelete': 'Remove {symbol}? This write is recorded in the kernel user_actions audit.',
+    'edit.confirmDeleteAction': 'Confirm removal',
+    'edit.confirmBar': 'Click again to confirm',
+    'edit.savedToast': 'Written to the kernel (user_actions audit)',
+    'edit.writeFailed': 'Write failed',
+    'edit.invalidQuantity': 'Enter a valid quantity',
+    'edit.invalidCost': 'Enter a valid cost',
+    'edit.invalidTarget': 'Enter a valid target price',
+    'edit.needSelection': 'Select an instrument from the results first',
+    'edit.needQuantity': 'Enter a quantity',
+    'edit.needCost': 'Enter a cost',
+    'edit.reselect': 'Reselect',
+    'edit.closing': 'Writing…',
+    'edit.holdingAdded': 'Holding added',
+    'edit.holdingUpdated': 'Holding updated',
+    'edit.holdingRemoved': 'Holding removed',
+    'edit.watchAdded': 'Watchlist entry added',
+    'edit.watchUpdated': 'Watchlist entry updated',
+    'edit.watchRemoved': 'Watchlist entry removed',
+    'edit.audited': 'Recorded in the kernel user_actions audit',
 };
 function interpolate(template, params) {
     if (!params)
@@ -455,6 +557,53 @@ function renderModel(kind, data) {
             return { ok: true, model: record };
     }
 }
+/** Form → kernel payload validation. Returns a locale error key, or null when valid. */
+function validateHoldingForm(form) {
+    if (form.symbol === '')
+        return 'edit.needSelection';
+    if (form.quantity.trim() === '' || !Number.isFinite(Number(form.quantity)) || Number(form.quantity) <= 0) {
+        return 'edit.invalidQuantity';
+    }
+    if (form.cost.trim() === '' || !Number.isFinite(Number(form.cost)) || Number(form.cost) < 0) {
+        return 'edit.invalidCost';
+    }
+    return null;
+}
+function validateWatchForm(form) {
+    if (form.symbol === '')
+        return 'edit.needSelection';
+    if (form.targetPrice.trim() !== '' && (!Number.isFinite(Number(form.targetPrice)) || Number(form.targetPrice) <= 0)) {
+        return 'edit.invalidTarget';
+    }
+    return null;
+}
+/** The POST body the Dashboard modal sends for an add/update/remove operation. */
+function buildMutationRequest(entity, action, payload) {
+    return { entity, action, payload };
+}
+/** Normalize the instruments route envelope into picker results (lossless on items). */
+function parseInstrumentsPayload(data) {
+    if (!data || typeof data !== 'object')
+        return { ok: false, reason: 'instruments payload is not an object' };
+    const record = data;
+    if (!Array.isArray(record.items))
+        return { ok: false, reason: 'instruments payload lacks items' };
+    return {
+        ok: true,
+        value: {
+            query: String(record.query ?? ''),
+            market: String(record.market ?? ''),
+            source: String(record.source ?? ''),
+            items: record.items,
+        },
+    };
+}
+/** row identity for kernel selectors: id first, then market+symbol. */
+function editSelector(row) {
+    if (row.id !== undefined)
+        return { id: row.id };
+    return { market: row.market, symbol: row.symbol };
+}
 const NS = 'dsh-debrief';
 const PANEL_ID = 'debrief-dashboard';
 const DASHBOARD_API = '/api/debrief/dashboard';
@@ -553,6 +702,37 @@ function clientFactory(requireFn) {
 .dbr-skeleton{height:96px;border-radius:var(--dbr-radius-sm);background:linear-gradient(90deg,var(--dsw-alias-bg-layer-2) 25%,var(--dsw-alias-bg-layer-1) 50%,var(--dsw-alias-bg-layer-2) 75%);background-size:200% 100%;animation:dbr-shimmer 1.4s infinite}
 @keyframes dbr-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .dbr-page-err{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.dbr-modal-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--dsw-alias-bg-base) 55%,transparent);display:flex;align-items:flex-start;justify-content:center;padding:48px 16px 16px;z-index:100}
+.dbr-modal{background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius);box-shadow:var(--dsw-elevation-prominent,0 12px 32px rgba(0,0,0,.2));width:min(560px,100%);max-height:calc(100vh - 96px);display:flex;flex-direction:column;overflow:hidden}
+.dbr-modal-head{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:.5px solid var(--dsw-alias-border-l1)}
+.dbr-modal-title{font-size:14px;font-weight:650;color:var(--dsw-alias-label-primary)}
+.dbr-modal-body{padding:12px 16px;overflow-y:auto;min-height:0}
+.dbr-modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:10px 16px;border-top:.5px solid var(--dsw-alias-border-l1)}
+.dbr-field{margin-bottom:10px}
+.dbr-field-label{font-size:11.5px;color:var(--dsw-alias-label-secondary);margin-bottom:4px;display:block}
+.dbr-input{box-sizing:border-box;width:100%;background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius-sm);color:var(--dsw-alias-label-primary);padding:6px 10px;font-size:13px}
+.dbr-input:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:0}
+.dbr-btn{border-radius:var(--dbr-radius-sm);border:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);padding:6px 14px;font-size:12.5px;cursor:pointer}
+.dbr-btn:hover{background:var(--dsw-alias-bg-layer-1)}
+.dbr-btn.primary{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1)}
+.dbr-btn.danger{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent);color:var(--dsw-alias-state-error-primary)}
+.dbr-btn:disabled{opacity:.55;cursor:default}
+.dbr-btn.sm{padding:2px 8px;font-size:11px}
+.dbr-picker-list{border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius-sm);max-height:210px;overflow-y:auto;margin-top:6px}
+.dbr-picker-row{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;font-size:12.5px;color:var(--dsw-alias-label-primary)}
+.dbr-picker-row.active,.dbr-picker-row.selected{background:var(--dsw-alias-bg-layer-2)}
+.dbr-picker-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+.dbr-selected-bar{display:flex;align-items:center;gap:8px;background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius-sm);padding:7px 10px;margin-top:6px;font-size:12.5px;color:var(--dsw-alias-label-primary)}
+.dbr-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:999px;box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.18));padding:8px 16px;font-size:12.5px;z-index:200;display:flex;gap:8px;align-items:center}
+.dbr-toast.ok{color:var(--dsw-alias-state-success-primary)}
+.dbr-toast.error{color:var(--dsw-alias-state-error-primary)}
+.dbr-switch{position:relative;display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--dsw-alias-label-primary)}
+.dbr-switch input{position:absolute;opacity:0;width:0;height:0}
+.dbr-switch-track{width:32px;height:18px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l1);position:relative;transition:background .15s}
+.dbr-switch input:checked + .dbr-switch-track{background:var(--dsw-alias-brand-primary)}
+.dbr-switch-track::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .15s}
+.dbr-switch input:checked + .dbr-switch-track::after{transform:translateX(14px);background:var(--dsw-alias-bg-layer-1)}
+.dbr-row-actions{display:flex;gap:4px;justify-content:flex-end}
 @media (max-width:768px){.dbr-page-grid{grid-template-columns:1fr}.dbr-page{padding:12px}}
 `;
     // ---- helpers --------------------------------------------------------------
@@ -999,6 +1179,24 @@ function clientFactory(requireFn) {
             ? h('span', { className: 'dbr-b ok', style: { marginLeft: 'auto' } }, String(record.status))
             : null));
     }
+    function EditResultCard(props) {
+        const t = pickT(props.t);
+        const { data, error } = envelopeOf(props.block);
+        if (error)
+            return h(Card, { icon: ICONS.write, title: t(props.titleKey), tool: props.tool, meta: t('edit.writeFailed') }, h(ErrorBody, { error, t }));
+        if (!data)
+            return h(Card, { icon: ICONS.write, title: t(props.titleKey), tool: props.tool, meta: '…' }, null);
+        const record = data;
+        return h(Card, { icon: ICONS.write, title: t(props.titleKey), tool: props.tool, meta: t('edit.audited') }, h('div', { className: 'dbr-job' }, h('span', { className: 'dbr-dot ok' }), h('span', {
+            style: {
+                fontFamily: 'ui-monospace, Menlo, monospace',
+                fontSize: 12,
+                color: 'var(--dsw-alias-label-primary)',
+            },
+        }, String(record.symbol ?? record.id ?? '')), h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } }, String(record.name ?? '')), record.status !== undefined
+            ? h('span', { className: 'dbr-b ok', style: { marginLeft: 'auto' } }, String(record.status))
+            : null));
+    }
     function DashboardCard(props) {
         const t = pickT(props.t);
         const { data, error } = envelopeOf(props.block);
@@ -1062,11 +1260,326 @@ function clientFactory(requireFn) {
             ? areaSvg({ points: props.points, color: props.color, fmtLabel: props.fmtLabel, t: props.t })
             : h('div', { className: 'dbr-skeleton' }));
     }
+    // ---- v2 edit modal ---------------------------------------------------------
+    const INSTRUMENTS_API = '/api/debrief/instruments';
+    const MUTATE_API = '/api/debrief/mutate';
+    const EDIT_MARKETS = ['us', 'cn', 'hk', 'crypto'];
+    let pickerRequestSeq = 0;
+    const MARKET_KEY = (market) => `mkt.${market.toLowerCase()}`;
+    function EditModal(props) {
+        const t = props.t;
+        const { entity, mode, row } = props.state;
+        const isEdit = mode === 'edit';
+        const isRemove = mode === 'remove';
+        const fixedMarket = String(row?.market ?? '').toLowerCase();
+        const [market, setMarket] = React.useState(isEdit || isRemove ? fixedMarket : 'us');
+        const [query, setQuery] = React.useState('');
+        const [results, setResults] = React.useState([]);
+        const [searchState, setSearchState] = React.useState('idle');
+        const [activeIndex, setActiveIndex] = React.useState(0);
+        const [selected, setSelected] = React.useState(isEdit || isRemove ? (row ?? null) : null);
+        const [quantity, setQuantity] = React.useState(isEdit ? String(row?.quantity ?? '') : '');
+        const [cost, setCost] = React.useState(isEdit ? String(row?.cost ?? '') : '');
+        const [targetPrice, setTargetPrice] = React.useState(isEdit ? (row?.targetPrice === null || row?.targetPrice === undefined ? '' : String(row.targetPrice)) : '');
+        // The GET watchlist `alert` reflects the combined alerting state; the stored
+        // switch is `alertEnabled` when present (kernel v13), else fall back to `alert`.
+        const [alertOn, setAlertOn] = React.useState(isEdit ? (typeof row?.alertEnabled === 'boolean' ? row.alertEnabled : row?.alert === true) : false);
+        const [busy, setBusy] = React.useState(false);
+        const [armed, setArmed] = React.useState(false);
+        const [error, setError] = React.useState(null);
+        const [errorKey, setErrorKey] = React.useState(null);
+        // Debounced instrument search (250ms) with requestId race guard + abort.
+        React.useEffect(() => {
+            if (isEdit || isRemove || query.trim() === '') {
+                setResults([]);
+                setSearchState('idle');
+                return;
+            }
+            let cancelled = false;
+            const controller = new AbortController();
+            const seq = ++pickerRequestSeq;
+            setSearchState('searching');
+            const timer = setTimeout(() => {
+                fetch(`${INSTRUMENTS_API}?market=${market}&query=${encodeURIComponent(query.trim())}`, {
+                    signal: controller.signal,
+                })
+                    .then(async (response) => {
+                    const body = (await response.json());
+                    if (cancelled || seq !== pickerRequestSeq)
+                        return;
+                    if (body.ok === true) {
+                        const parsed = parseInstrumentsPayload(body.data);
+                        setResults(parsed.ok ? parsed.value.items : []);
+                        setActiveIndex(0);
+                        setSearchState('ready');
+                    }
+                    else {
+                        setSearchState('error');
+                    }
+                })
+                    .catch(() => {
+                    if (!cancelled && seq === pickerRequestSeq)
+                        setSearchState('error');
+                });
+            }, 250);
+            return () => {
+                cancelled = true;
+                clearTimeout(timer);
+                controller.abort();
+            };
+        }, [query, market, isEdit, isRemove]);
+        // Switching market resets the pick (add mode only).
+        React.useEffect(() => {
+            if (!isEdit && !isRemove) {
+                setSelected(null);
+                setQuery('');
+                setResults([]);
+                setSearchState('idle');
+            }
+        }, [market, isEdit, isRemove]);
+        // Escape closes while not busy.
+        React.useEffect(() => {
+            const onKey = (e) => {
+                if (e.key === 'Escape' && !busy)
+                    props.onClose();
+            };
+            document.addEventListener('keydown', onKey);
+            return () => document.removeEventListener('keydown', onKey);
+        }, [busy]);
+        function onPickerKeyDown(e) {
+            if (results.length === 0)
+                return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setActiveIndex((index) => Math.min(index + 1, results.length - 1));
+            }
+            else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setActiveIndex((index) => Math.max(index - 1, 0));
+            }
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                const item = results[activeIndex];
+                if (item)
+                    setSelected(item);
+            }
+        }
+        function submit() {
+            setError(null);
+            setErrorKey(null);
+            if (isRemove) {
+                if (!row)
+                    return;
+                if (!armed) {
+                    setArmed(true);
+                    return;
+                }
+                setBusy(true);
+                postEdit(buildMutationRequest(entity, 'remove', editSelector(row)));
+                return;
+            }
+            const payload = {};
+            if (isEdit && row) {
+                Object.assign(payload, editSelector(row));
+            }
+            else if (selected) {
+                payload.market = String(selected.market ?? market).toLowerCase();
+                payload.symbol = selected.symbol;
+                if (typeof selected.name === 'string' && selected.name !== '')
+                    payload.name = selected.name;
+            }
+            else {
+                setErrorKey('edit.needSelection');
+                return;
+            }
+            if (entity === 'holding') {
+                const q = quantity.trim();
+                const c = cost.trim();
+                if (q === '' || !Number.isFinite(Number(q)) || Number(q) <= 0) {
+                    setErrorKey('edit.invalidQuantity');
+                    return;
+                }
+                if (c === '' || !Number.isFinite(Number(c)) || Number(c) < 0) {
+                    setErrorKey('edit.invalidCost');
+                    return;
+                }
+                payload.quantity = Number(q);
+                payload.cost = Number(c);
+            }
+            else {
+                const tp = targetPrice.trim();
+                if (tp !== '' && (!Number.isFinite(Number(tp)) || Number(tp) <= 0)) {
+                    setErrorKey('edit.invalidTarget');
+                    return;
+                }
+                if (tp !== '')
+                    payload.targetPrice = Number(tp);
+                else if (isEdit)
+                    payload.targetPrice = null;
+                payload.alert = alertOn;
+            }
+            setBusy(true);
+            postEdit(buildMutationRequest(entity, isEdit ? 'update' : 'add', payload));
+        }
+        function postEdit(req) {
+            fetch(MUTATE_API, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(req),
+            })
+                .then(async (response) => {
+                const body = (await response.json());
+                if (body.ok === true) {
+                    props.onSaved();
+                    props.onClose();
+                    return;
+                }
+                const failure = (body.error ?? { code: 'DEBRIEF_ERROR', message: '' });
+                setError(failure);
+                setBusy(false);
+                setArmed(false);
+            })
+                .catch(() => {
+                setError({ code: 'DEBRIEF_NETWORK', message: '' });
+                setBusy(false);
+                setArmed(false);
+            });
+        }
+        const title = isRemove
+            ? t('edit.confirmDeleteTitle')
+            : entity === 'holding'
+                ? isEdit
+                    ? t('edit.modalEditHolding')
+                    : t('edit.modalAddHolding')
+                : isEdit
+                    ? t('edit.modalEditWatch')
+                    : t('edit.modalAddWatch');
+        return h('div', { className: 'dbr-modal-overlay', onMouseDown: () => (busy ? undefined : props.onClose()) }, h('div', {
+            className: 'dbr-modal',
+            role: 'dialog',
+            'aria-modal': true,
+            'aria-label': title,
+            onMouseDown: (e) => e.stopPropagation(),
+        }, h('div', { className: 'dbr-modal-head' }, h('span', { className: 'dbr-modal-title' }, title), h('button', {
+            type: 'button',
+            className: 'dbr-btn sm',
+            style: { marginLeft: 'auto' },
+            onClick: () => (busy ? undefined : props.onClose()),
+        }, t('edit.cancel'))), h('div', { className: 'dbr-modal-body' }, isRemove
+            ? h('p', { className: 'dbr-text' }, t('edit.confirmDelete', { symbol: `${String(row?.market ?? '')} ${String(row?.symbol ?? '')}` }))
+            : h('div', null, h('div', { className: 'dbr-field' }, h('span', { className: 'dbr-field-label' }, t('edit.market')), h('div', { className: 'dbr-chips' }, EDIT_MARKETS.map((value) => h('button', {
+                type: 'button',
+                key: value,
+                className: 'dbr-chip' + (value === market ? ' active' : ''),
+                'aria-pressed': value === market,
+                disabled: isEdit || isRemove,
+                onClick: () => setMarket(value),
+            }, t(MARKET_KEY(value)))))), isEdit
+                ? h('div', { className: 'dbr-selected-bar' }, h('span', { className: 'dbr-picker-code' }, String(row?.symbol ?? '')), h('span', null, String(row?.name ?? '')), h('span', { className: 'dbr-b market' }, t(MARKET_KEY(fixedMarket))))
+                : h('div', { className: 'dbr-field' }, h('span', { className: 'dbr-field-label' }, t('edit.searchLabel')), h('input', {
+                    className: 'dbr-input',
+                    type: 'text',
+                    value: query,
+                    placeholder: t('edit.searchPlaceholder'),
+                    autoComplete: 'off',
+                    onChange: (e) => {
+                        setQuery(e.target.value);
+                        setSelected(null);
+                    },
+                    onKeyDown: onPickerKeyDown,
+                }), searchState === 'searching'
+                    ? h('div', { className: 'dbr-hint' }, t('edit.searching'))
+                    : searchState === 'error'
+                        ? h('div', { className: 'dbr-hint' }, t('edit.searchError'))
+                        : query.trim() !== '' && results.length === 0 && searchState === 'ready'
+                            ? h('div', { className: 'dbr-hint' }, t('edit.searchEmpty'))
+                            : null, results.length > 0
+                    ? h('div', { className: 'dbr-picker-list', role: 'listbox', 'aria-label': t('edit.searchLabel') }, results.map((item, index) => h('div', {
+                        key: String(item.symbol ?? ''),
+                        role: 'option',
+                        'aria-selected': selected?.symbol === item.symbol,
+                        className: 'dbr-picker-row' +
+                            (index === activeIndex ? ' active' : '') +
+                            (selected?.symbol === item.symbol ? ' selected' : ''),
+                        onMouseEnter: () => setActiveIndex(index),
+                        onClick: () => setSelected(item),
+                    }, h('span', { className: 'dbr-picker-code' }, String(item.symbol ?? '')), h('span', null, String(item.name ?? '')), h('span', { className: 'dbr-b market' }, t(MARKET_KEY(String(item.market ?? market)))), item.held === true ? h('span', { className: 'dbr-b ok' }, t('edit.held')) : null)))
+                    : null, selected
+                    ? h('div', { className: 'dbr-selected-bar' }, h('span', { className: 'dbr-picker-code' }, String(selected.symbol ?? '')), h('span', null, String(selected.name ?? '')), h('span', { className: 'dbr-b ok' }, '✓'), h('button', {
+                        type: 'button',
+                        className: 'dbr-btn sm',
+                        style: { marginLeft: 'auto' },
+                        onClick: () => setSelected(null),
+                    }, t('edit.reselect')))
+                    : null), entity === 'holding'
+                ? h('div', null, h('div', { className: 'dbr-field' }, h('span', { className: 'dbr-field-label' }, t('edit.quantity')), h('input', {
+                    className: 'dbr-input',
+                    type: 'number',
+                    min: '0',
+                    step: 'any',
+                    value: quantity,
+                    onChange: (e) => setQuantity(e.target.value),
+                })), h('div', { className: 'dbr-field' }, h('span', { className: 'dbr-field-label' }, t('edit.cost')), h('input', {
+                    className: 'dbr-input',
+                    type: 'number',
+                    min: '0',
+                    step: 'any',
+                    value: cost,
+                    onChange: (e) => setCost(e.target.value),
+                })))
+                : h('div', null, h('div', { className: 'dbr-field' }, h('span', { className: 'dbr-field-label' }, t('edit.targetPrice')), h('input', {
+                    className: 'dbr-input',
+                    type: 'number',
+                    min: '0',
+                    step: 'any',
+                    value: targetPrice,
+                    placeholder: '—',
+                    onChange: (e) => setTargetPrice(e.target.value),
+                })), h('label', { className: 'dbr-switch' }, h('input', {
+                    type: 'checkbox',
+                    role: 'switch',
+                    checked: alertOn,
+                    onChange: (e) => setAlertOn(e.target.checked),
+                }), h('span', { className: 'dbr-switch-track' }), h('span', null, t('edit.alert'), alertOn ? ` · ${t('edit.alertOn')}` : ` · ${t('edit.alertOff')}`)))), errorKey
+            ? h('div', { className: 'dbr-err', style: { margin: '0 16px 8px' } }, h('span', null, t(errorKey)))
+            : error
+                ? h('div', { className: 'dbr-err', style: { margin: '0 16px 8px' } }, h('span', { className: 'dbr-code' }, error.code), h('span', null, errorExplanation(t, error.code) || error.message))
+                : null), h('div', { className: 'dbr-modal-foot' }, h('button', {
+            type: 'button',
+            className: 'dbr-btn',
+            onClick: () => (busy ? undefined : props.onClose()),
+            disabled: busy,
+        }, t('edit.cancel')), h('button', {
+            type: 'button',
+            className: isRemove ? 'dbr-btn danger' : 'dbr-btn primary',
+            disabled: busy,
+            onClick: submit,
+        }, busy
+            ? t('edit.closing')
+            : isRemove
+                ? armed
+                    ? t('edit.confirmDeleteAction')
+                    : t('edit.confirmBar')
+                : t('edit.submit')))));
+    }
     function DashboardPage(props) {
         const t = pickT(props.t);
         const [range, setRange] = React.useState('90');
         const [state, setState] = React.useState({ status: 'loading', data: null, error: null });
         const [attempt, setAttempt] = React.useState(0);
+        const [modal, setModal] = React.useState(null);
+        const [toast, setToast] = React.useState(null);
+        React.useEffect(() => {
+            if (toast === null)
+                return;
+            const timer = setTimeout(() => setToast(null), 3200);
+            return () => clearTimeout(timer);
+        }, [toast]);
+        const showToast = (tone, text) => setToast({ id: Date.now(), tone, text });
+        const onSaved = () => {
+            showToast('ok', t('edit.savedToast'));
+            setAttempt((previous) => previous + 1);
+        };
         React.useEffect(() => {
             let cancelled = false;
             const controller = new AbortController();
@@ -1152,11 +1665,35 @@ function clientFactory(requireFn) {
                         })
                         : null), composition.length > 0
                         ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.composition')), h('div', { className: 'dbr-donut' }, donutSvg(composition, t('dashboard.positions', { count: holdings.length }), '100%', t('chart.donutAria')), donutLegend(composition)))
-                        : null, h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.holdings'), h('button', { type: 'button', className: 'dbr-more', title: t('page.addComing'), onClick: () => { } }, t('page.addHolding'))), holdings.length > 0
-                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.quantity')), h('th', null, t('col.cost')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')))), h('tbody', null, holdings.map((p) => h('tr', { key: String(p.symbol ?? '') }, h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.quantity, 4)), h('td', null, fmt(p.cost)), h('td', null, fmt(p.price)), h('td', null, fmt(p.marketValue, 0)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`))))))
-                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('watchlist.title'), h('button', { type: 'button', className: 'dbr-more', title: t('page.addComing'), onClick: () => { } }, t('page.addWatch'))), watchlist.length > 0
-                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.changePct')), h('th', null, t('col.targetPrice')), h('th', null, t('col.distancePct')), h('th', null, t('col.alert')))), h('tbody', null, watchlist.map((w) => h('tr', { key: String(w.symbol ?? '') }, h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price)), h('td', { className: updown(w.changePct) }, pct(w.changePct)), h('td', null, fmt(w.targetPrice)), h('td', { className: updown(w.distancePct) }, pct(w.distancePct)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff'))))))))
-                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-hint' }, t('page.addComing')))));
+                        : null, h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.holdings'), h('button', {
+                        type: 'button',
+                        className: 'dbr-more',
+                        onClick: () => setModal({ entity: 'holding', mode: 'add' }),
+                    }, t('edit.addHolding'))), holdings.length > 0
+                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.quantity')), h('th', null, t('col.cost')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')), h('th', { style: { textAlign: 'right' } }, t('edit.update')))), h('tbody', null, holdings.map((p) => h('tr', { key: String(p.id ?? p.symbol ?? '') }, h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.quantity, 4)), h('td', null, fmt(p.cost)), h('td', null, fmt(p.price)), h('td', null, fmt(p.marketValue, 0)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`), h('td', null, h('span', { className: 'dbr-row-actions' }, h('button', {
+                            type: 'button',
+                            className: 'dbr-btn sm',
+                            onClick: () => setModal({ entity: 'holding', mode: 'edit', row: p }),
+                        }, t('edit.update')), h('button', {
+                            type: 'button',
+                            className: 'dbr-btn sm danger',
+                            onClick: () => setModal({ entity: 'holding', mode: 'remove', row: p }),
+                        }, t('edit.remove')))))))))
+                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('watchlist.title'), h('button', {
+                        type: 'button',
+                        className: 'dbr-more',
+                        onClick: () => setModal({ entity: 'watchlist', mode: 'add' }),
+                    }, t('edit.addWatch'))), watchlist.length > 0
+                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.changePct')), h('th', null, t('col.targetPrice')), h('th', null, t('col.distancePct')), h('th', null, t('col.alert')), h('th', { style: { textAlign: 'right' } }, t('edit.update')))), h('tbody', null, watchlist.map((w) => h('tr', { key: String(w.id ?? w.symbol ?? '') }, h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price)), h('td', { className: updown(w.changePct) }, pct(w.changePct)), h('td', null, fmt(w.targetPrice)), h('td', { className: updown(w.distancePct) }, pct(w.distancePct)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff'))), h('td', null, h('span', { className: 'dbr-row-actions' }, h('button', {
+                            type: 'button',
+                            className: 'dbr-btn sm',
+                            onClick: () => setModal({ entity: 'watchlist', mode: 'edit', row: w }),
+                        }, t('edit.update')), h('button', {
+                            type: 'button',
+                            className: 'dbr-btn sm danger',
+                            onClick: () => setModal({ entity: 'watchlist', mode: 'remove', row: w }),
+                        }, t('edit.remove')))))))))
+                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), modal ? h(EditModal, { t, state: modal, onClose: () => setModal(null), onSaved }) : null, toast ? h('div', { className: 'dbr-toast ' + toast.tone, role: 'status' }, toast.text) : null));
     }
     function PanelGlyph(props) {
         return h('svg', {
@@ -1184,6 +1721,12 @@ function clientFactory(requireFn) {
         debrief_report_create: (props) => h(WriteResultCard, { ...props, tool: 'debrief_report_create', kind: 'report' }),
         debrief_memory_compact_write: (props) => h(WriteResultCard, { ...props, tool: 'debrief_memory_compact_write', kind: 'compact' }),
         debrief_memory_add: (props) => h(WriteResultCard, { ...props, tool: 'debrief_memory_add', kind: 'add' }),
+        debrief_holding_add: (props) => h(EditResultCard, { ...props, tool: 'debrief_holding_add', titleKey: 'edit.holdingAdded' }),
+        debrief_holding_update: (props) => h(EditResultCard, { ...props, tool: 'debrief_holding_update', titleKey: 'edit.holdingUpdated' }),
+        debrief_holding_remove: (props) => h(EditResultCard, { ...props, tool: 'debrief_holding_remove', titleKey: 'edit.holdingRemoved' }),
+        debrief_watchlist_add: (props) => h(EditResultCard, { ...props, tool: 'debrief_watchlist_add', titleKey: 'edit.watchAdded' }),
+        debrief_watchlist_update: (props) => h(EditResultCard, { ...props, tool: 'debrief_watchlist_update', titleKey: 'edit.watchUpdated' }),
+        debrief_watchlist_remove: (props) => h(EditResultCard, { ...props, tool: 'debrief_watchlist_remove', titleKey: 'edit.watchRemoved' }),
     };
     function apply(ctx) {
         const disposeStyle = ctx.effect(() => {

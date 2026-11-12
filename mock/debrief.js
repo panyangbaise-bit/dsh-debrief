@@ -29,7 +29,7 @@ for (let i = 1; i < argv.length; i++) {
   }
 }
 
-const HOLDINGS = [
+const SEED_HOLDINGS = [
   {
     market: 'CN',
     symbol: '600519',
@@ -98,7 +98,7 @@ const HOLDINGS = [
   },
 ]
 
-const WATCHLIST = [
+const SEED_WATCHLIST = [
   {
     market: 'US',
     symbol: 'NVDA',
@@ -402,7 +402,8 @@ function dashboard(range) {
 // ---- write-side state (file-backed so state survives across processes,
 // ---- mirroring the kernel's idempotent ledgers) -----------------------------
 
-const STATE_FILE = fileURLToPath(new URL('./.debrief-mock-state.json', import.meta.url))
+const STATE_FILE =
+  process.env.DEBRIEF_MOCK_STATE ?? fileURLToPath(new URL('./.debrief-mock-state.json', import.meta.url))
 
 function loadState() {
   try {
@@ -428,6 +429,14 @@ let memoryDocSeq = persisted.memoryDocSeq ?? 3000
 let compactSeq = persisted.compactSeq ?? 1
 let reportSeq = persisted.reportSeq ?? 1
 const runningJobs = new Map(Object.entries(persisted.jobs ?? {}))
+const HOLDINGS = (persisted.holdings ?? SEED_HOLDINGS).map((row, index) => ({
+  id: row.id ?? `hld-${index + 1}`,
+  ...row,
+}))
+const WATCHLIST = (persisted.watchlist ?? SEED_WATCHLIST).map((row, index) => ({
+  id: row.id ?? `wl-${index + 1}`,
+  ...row,
+}))
 
 function persistState() {
   saveState({
@@ -438,7 +447,21 @@ function persistState() {
     compactSeq,
     reportSeq,
     jobs: Object.fromEntries(runningJobs),
+    holdings: HOLDINGS,
+    watchlist: WATCHLIST,
   })
+}
+
+function findRow(list, payload) {
+  if (typeof payload.id === 'string' && payload.id !== '') return list.find((row) => row.id === payload.id)
+  if (typeof payload.market === 'string' && typeof payload.symbol === 'string') {
+    return list.find(
+      (row) =>
+        row.market.toUpperCase() === payload.market.toUpperCase() &&
+        row.symbol.toUpperCase() === payload.symbol.toUpperCase(),
+    )
+  }
+  return undefined
 }
 
 function readStdin() {
@@ -467,6 +490,81 @@ async function main() {
 
   switch (command) {
     case 'holdings': {
+      const sub = argv[1]
+      if (sub === 'add') {
+        if (!stdinPayload || typeof stdinPayload !== 'object') {
+          console.log(fail('DEBRIEF_USAGE', 'holdings add requires a JSON payload on stdin'))
+          break
+        }
+        const p = stdinPayload
+        if (
+          typeof p.market !== 'string' ||
+          typeof p.symbol !== 'string' ||
+          typeof p.quantity !== 'number' ||
+          typeof p.cost !== 'number'
+        ) {
+          console.log(fail('DEBRIEF_USAGE', 'market, symbol, quantity, cost are required'))
+          break
+        }
+        if (findRow(HOLDINGS, p)) {
+          console.log(fail('DEBRIEF_CONFLICT', `holding ${p.market}:${p.symbol} already exists`))
+          break
+        }
+        const row = {
+          id: `hld-${Date.now()}`,
+          market: p.market.toUpperCase(),
+          symbol: p.symbol,
+          name: typeof p.name === 'string' && p.name !== '' ? p.name : p.symbol,
+          quantity: p.quantity,
+          cost: p.cost,
+          price: p.cost,
+          marketValue: Math.round(p.quantity * p.cost * 100) / 100,
+          pnlPct: 0,
+          weight: 0,
+        }
+        HOLDINGS.push(row)
+        persistState()
+        console.log(
+          ok({
+            id: row.id,
+            market: row.market,
+            symbol: row.symbol,
+            name: row.name,
+            quantity: row.quantity,
+            cost: row.cost,
+          }),
+        )
+        break
+      }
+      if (sub === 'update' || sub === 'remove') {
+        if (!stdinPayload || typeof stdinPayload !== 'object') {
+          console.log(fail('DEBRIEF_USAGE', `holdings ${sub} requires a JSON payload on stdin`))
+          break
+        }
+        const row = findRow(HOLDINGS, stdinPayload)
+        if (!row) {
+          console.log(fail('DEBRIEF_NOT_FOUND', 'holding not found (id or market+symbol did not match)'))
+          break
+        }
+        if (sub === 'update') {
+          if (typeof stdinPayload.quantity === 'number') {
+            row.quantity = stdinPayload.quantity
+            row.marketValue = Math.round(row.quantity * row.cost * 100) / 100
+          }
+          if (typeof stdinPayload.cost === 'number') {
+            row.cost = stdinPayload.cost
+            row.marketValue = Math.round(row.quantity * row.cost * 100) / 100
+          }
+          persistState()
+          console.log(ok({ id: row.id, status: 'updated' }))
+          break
+        }
+        const index = HOLDINGS.indexOf(row)
+        HOLDINGS.splice(index, 1)
+        persistState()
+        console.log(ok({ id: row.id, status: 'removed' }))
+        break
+      }
       const positions = flags.status === 'open' ? HOLDINGS : HOLDINGS
       console.log(
         ok({
@@ -490,9 +588,74 @@ async function main() {
       console.log(ok({ total: 48, limit, offset, items: items.slice(offset, offset + limit) }))
       break
     }
-    case 'watchlist':
-      console.log(ok({ count: 12, items: WATCHLIST }))
+    case 'watchlist': {
+      const sub = argv[1]
+      if (sub === 'add') {
+        if (!stdinPayload || typeof stdinPayload !== 'object') {
+          console.log(fail('DEBRIEF_USAGE', 'watchlist add requires a JSON payload on stdin'))
+          break
+        }
+        const p = stdinPayload
+        if (typeof p.market !== 'string' || typeof p.symbol !== 'string') {
+          console.log(fail('DEBRIEF_USAGE', 'market, symbol are required'))
+          break
+        }
+        if (findRow(WATCHLIST, p)) {
+          console.log(fail('DEBRIEF_CONFLICT', `watchlist entry ${p.market}:${p.symbol} already exists`))
+          break
+        }
+        const row = {
+          id: `wl-${Date.now()}`,
+          market: p.market.toUpperCase(),
+          symbol: p.symbol,
+          name: typeof p.name === 'string' && p.name !== '' ? p.name : p.symbol,
+          price: 0,
+          changePct: 0,
+          targetPrice: typeof p.targetPrice === 'number' ? p.targetPrice : null,
+          distancePct: null,
+          alert: typeof p.alert === 'boolean' ? p.alert : false,
+        }
+        WATCHLIST.push(row)
+        persistState()
+        console.log(
+          ok({
+            id: row.id,
+            market: row.market,
+            symbol: row.symbol,
+            name: row.name,
+            targetPrice: row.targetPrice,
+            alert: row.alert,
+          }),
+        )
+        break
+      }
+      if (sub === 'update' || sub === 'remove') {
+        if (!stdinPayload || typeof stdinPayload !== 'object') {
+          console.log(fail('DEBRIEF_USAGE', `watchlist ${sub} requires a JSON payload on stdin`))
+          break
+        }
+        const row = findRow(WATCHLIST, stdinPayload)
+        if (!row) {
+          console.log(fail('DEBRIEF_NOT_FOUND', 'watchlist entry not found (id or market+symbol did not match)'))
+          break
+        }
+        if (sub === 'update') {
+          if (typeof stdinPayload.targetPrice === 'number' || stdinPayload.targetPrice === null)
+            row.targetPrice = stdinPayload.targetPrice
+          if (typeof stdinPayload.alert === 'boolean') row.alert = stdinPayload.alert
+          persistState()
+          console.log(ok({ id: row.id, status: 'updated' }))
+          break
+        }
+        const index = WATCHLIST.indexOf(row)
+        WATCHLIST.splice(index, 1)
+        persistState()
+        console.log(ok({ id: row.id, status: 'removed' }))
+        break
+      }
+      console.log(ok({ count: WATCHLIST.length, items: WATCHLIST }))
       break
+    }
     case 'instruments': {
       const market = flags.market ?? 'us'
       const query = String(flags.query ?? '')

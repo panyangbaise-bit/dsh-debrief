@@ -1,19 +1,30 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeEnvelope, runCli } from '../src/host/cli'
 import { normalizeConfig } from '../src/host/config'
 
 const MOCK = fileURLToPath(new URL('../mock/debrief.js', import.meta.url))
-const MOCK_STATE = fileURLToPath(new URL('../mock/.debrief-mock-state.json', import.meta.url))
+const MOCK_STATE = join(tmpdir(), 'debrief-mock-cli-test.json')
 const config = normalizeConfig({ cliPath: process.execPath, timeoutMs: 10000 }, {})
 const cli = (args: string[], stdin?: string) => runCli(config, [MOCK, ...args], stdin === undefined ? {} : { stdin })
 
 beforeEach(() => {
+  process.env.DEBRIEF_MOCK_STATE = MOCK_STATE
   try {
     rmSync(MOCK_STATE, { force: true })
   } catch {
     /* state file absent — fine */
+  }
+})
+
+afterAll(() => {
+  try {
+    rmSync(MOCK_STATE, { force: true })
+  } catch {
+    /* already gone */
   }
 })
 

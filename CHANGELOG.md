@@ -5,6 +5,55 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 版本由 [release-please](https://github.com/googleapis/release-please) 自动管理。
 
+## [0.2.0] - 2026-11-12
+
+### Added
+
+- v2 portfolio editing through one implementation, two callers (UserActions
+  pattern): six approval-gated agent tools (`debrief_holding_add/update/remove`,
+  `debrief_watchlist_add/update/remove` → kernel `holdings|watchlist
+  add|update|remove --json` with stdin payloads), a Client-callable POST route
+  `/api/debrief/mutate`, and the Dashboard modal — all executing the same Host
+  operation (`runEdit`).
+- DSH approval confirmation flow for agent-initiated writes: a
+  `tools/pre-execute` listener returns `ask` (bilingual display reasons) for
+  the six write tools; without approval support the framework converts the ask
+  into a denial, so writes are refused with a structured error instead of
+  executing silently.
+- Authenticated read route `/api/debrief/instruments?market=&query=` for the
+  search-style instrument picker.
+- Dashboard editing UI: “+ 添加持仓 / + 添加自选” open a modal with market
+  chips, a debounced (250ms) keyboard-navigable instrument picker (held
+  marker, empty/error states, requestId race guard), quantity/cost or target
+  price/alert-switch forms; row-level 编辑/删除 with prefilled edit forms and
+  double-confirm removal; success toast + automatic data refresh; all copy
+  zh/en localized.
+- Six keyed toolview cards for the write tools (write-result card with audit
+  note).
+- Mock kernel extended with `holdings add|update|remove` and `watchlist
+  add|update|remove` matching the real kernel responses
+  (`DEBRIEF_CONFLICT` / `DEBRIEF_NOT_FOUND` / `DEBRIEF_USAGE`), with an
+  isolated state-file override (`DEBRIEF_MOCK_STATE`) for tests.
+- Tests for edit payload validation, approval decisions, mock round-trips
+  (add→conflict→update→remove), form validation, and mutation request
+  building.
+
+### Fixed
+
+- renderModel lost undeclared payload fields (the whitelist validator dropped
+  quantity/cost/price/marketValue/pnlPct/weight/changePct/targetPrice/
+  distancePct/alert from dashboard holdings/watchlist rows, blanking every
+  table cell). The client validator now validates declared fields but never
+  drops undeclared keys, and all kind schemas are complete; regression tests
+  assert renderModel output deep-equals input.
+
+### Changed
+
+- Watchlist `alert` semantics: the GET list's `alert` reflects the combined
+  alerting state (switch on and price touched); the write commands return the
+  stored switch value. The edit modal prefills from `alertEnabled` when
+  present, falling back to `alert` (documented in docs/ui.md).
+
 ## [0.1.0] - 2026-11-11
 
 ### Added

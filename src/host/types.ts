@@ -101,6 +101,19 @@ export interface ScheduleService {
   create(request: ScheduleCreateRequest): Promise<ScheduleCatalogEntry>
 }
 
+/** tools/pre-execute waterfall decision vocabulary (inspected contract). */
+export type PreToolDecision =
+  | { kind: 'allow' }
+  | { kind: 'deny'; reason: string }
+  | { kind: 'cancel' }
+  | { kind: 'ask'; reason?: string; displayReason?: { en: string; [locale: string]: string } }
+
+export interface ToolExecutionLike {
+  name: string
+  arguments?: unknown
+  agent?: { id: string }
+}
+
 /**
  * Services consumed through the plugin's `inject` declaration
  * (['tools', 'commands', 'schedule', 'connection', 'skills']). The inspect
@@ -111,6 +124,7 @@ export interface ScheduleService {
  */
 export interface DebriefContext {
   effect(setup: () => void | (() => void), label?: string): void
+  on(name: string, listener: (...args: never[]) => unknown, prepend?: boolean): () => void
   tools: {
     register(definition: ToolDefinition): () => void
   }

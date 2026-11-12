@@ -51,6 +51,27 @@
 7. 监察表（头部「+ 添加自选」，v2 占位入口）。
 8. 底部提示：添加入口 v2 走 DSH 确认流。
 
+## v2 编辑能力（Dashboard）
+
+- **入口**：持仓表/监察表头部「+ 添加持仓」「+ 添加自选」；行内「编辑 / 删除」。
+- **弹窗**：市场 chips（us/cn/hk/crypto，编辑模式固定为行市场）+ 搜索式选标器 +
+  表单（持仓：数量/成本价；自选：关注价/提醒开关）+ 提交/取消。纯组件实现
+  （role=dialog/aria-modal/Escape 关闭/遮罩点击关闭），不依赖宿主 UI 包。
+- **选标器**：数据源 = 认证路由 `/api/debrief/instruments`；250ms 防抖 + requestId
+  竞态丢弃 + AbortController；↑↓ 键盘导航 + Enter 选择；已持有徽标（目录 `held`）；
+  空态/错误态/搜索中三态；选中显示确认条（可重新选择）。
+- **删除二次确认**：行删除 → 确认弹窗 → 「再次点击确认删除」武装态 → 第二次点击才提交。
+- **提交 → 写回**：`POST /api/debrief/mutate`（认证路由）→ 内核写入（user_actions 审计）
+  → toast 反馈 + 自动刷新表格；失败在弹窗内显示错误码 + 说明（`DEBRIEF_CONFLICT`/
+  `DEBRIEF_NOT_FOUND`/`DEBRIEF_USAGE`），写操作绝不静默发起。
+- **Agent 侧同源**：同一 Host 操作暴露为 6 个审批门控工具；审批拒绝显示
+  `DEBRIEF_APPROVAL` 错误卡。
+- **alert 语义**：监察表 GET 的 `alert` 字段 = 「开关开启且现价触及关注价」的告警态；
+  写命令返回/回填的开关值以 `alertEnabled`（内核 v13）为准，缺省回退 `alert`。
+  编辑弹窗回填开关状态优先取 `alertEnabled`。
+- 全部文案 zh/en locale；数字校验（数量 >0、成本 ≥0、关注价 >0 或留空）在客户端先行，
+  服务端/工具侧再做 schema 校验。
+
 ## 验证口径
 
 - keyed 命中替换通用行；zod 失败 → fallback，slot 不 crash。
@@ -119,6 +140,34 @@
 6. Holdings table (header “+ Add holding”, v2 placeholder).
 7. Watchlist table (header “+ Add watch”, v2 placeholder).
 8. Footer note: add entries arrive in v2 through the DSH confirmation flow.
+
+## v2 editing (Dashboard)
+
+- **Entry points**: “+ Add holding” / “+ Add watch” headers and per-row
+  Edit / Remove buttons.
+- **Modal**: market chips (us/cn/hk/crypto; fixed to the row's market in edit
+  mode) + search-style instrument picker + form (holdings: quantity/cost;
+  watchlist: target price/alert switch) + submit/cancel. Plain components only
+  (role=dialog, aria-modal, Escape and overlay-click close); no host UI package.
+- **Picker**: data from the authenticated route `/api/debrief/instruments`;
+  250ms debounce + requestId race guard + AbortController; ↑↓ navigation and
+  Enter to select; held badge (catalog `held`); idle/searching/empty/error
+  states; a confirm bar after selection (reselectable).
+- **Removal double-confirm**: row remove → confirm modal → the danger button
+  arms (“click again to confirm”) and only a second click submits.
+- **Submit → write-back**: `POST /api/debrief/mutate` (authenticated route) →
+  kernel write (user_actions audit) → toast + automatic refresh; failures show
+  code + explanation inside the modal (`DEBRIEF_CONFLICT` / `DEBRIEF_NOT_FOUND`
+  / `DEBRIEF_USAGE`). Writes are never fired silently.
+- **Agent parity**: the same Host operation is exposed as the six
+  approval-gated tools; an approval denial renders a `DEBRIEF_APPROVAL` error
+  card.
+- **alert semantics**: the watchlist GET `alert` field is the combined
+  alerting state (switch on AND price touched); the stored switch value the
+  write commands return/prefill is `alertEnabled` (kernel v13), falling back to
+  `alert`. The edit modal prefills the switch from `alertEnabled` first.
+- All copy is zh/en localized; numeric validation (quantity > 0, cost ≥ 0,
+  target > 0 or empty) runs client-side first, then server/tool schema checks.
 
 ## Acceptance criteria
 

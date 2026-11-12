@@ -11,6 +11,8 @@ import { defineTools } from './tools.js';
 import { loadSkills, registerSkills } from './skills.js';
 import { loadSchedulePresets, registerSetupCommand } from './schedule.js';
 import { registerDashboardRoute } from './dashboard.js';
+import { registerEditRoutes } from './routes.js';
+import { gateWriteTools } from './edits.js';
 /**
  * Hard dependencies per the inspected access contracts: a missing service
  * keeps the plugin inactive instead of half-activating (the earlier ctx.get
@@ -36,5 +38,20 @@ export function apply(rawCtx, rawConfig) {
         return registerSetupCommand(ctx, config, loadSchedulePresets());
     }, 'dsh-debrief: setup command');
     ctx.effect(() => registerDashboardRoute(ctx, config), 'dsh-debrief: dashboard route');
+    ctx.effect(() => registerEditRoutes(ctx, config), 'dsh-debrief: edit routes');
+    // v2 approval gate: agent-initiated portfolio writes ask the user through
+    // the DSH approval confirmation flow; without approval support the ask
+    // becomes a denial, so a write is refused instead of executed silently.
+    ctx.effect(() => {
+        try {
+            return ctx.on('tools/pre-execute', (exec, next) => {
+                return gateWriteTools(exec, next);
+            });
+        }
+        catch (error) {
+            console.warn('[dsh-debrief] tools/pre-execute listener registration failed:', error instanceof Error ? error.message : error);
+            return () => { };
+        }
+    }, 'dsh-debrief: approval gate');
     return () => { };
 }

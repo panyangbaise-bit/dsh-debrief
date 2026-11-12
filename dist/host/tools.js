@@ -6,6 +6,7 @@
  */
 import { runCli } from './cli.js';
 import { validate, arr, obj, opt, s } from './schema.js';
+import { runEdit } from './edits.js';
 const OUT_SCHEMA = { description: 'debrief kernel envelope' };
 function jsonOut(_args, value) {
     return [{ type: 'text', text: JSON.stringify(value) }];
@@ -16,6 +17,8 @@ const sProp = (description) => ({ type: 'string', description });
 const iProp = (description) => ({ type: 'integer', description });
 /** Boolean property node in compiled form. */
 const bProp = (description) => ({ type: 'boolean', description });
+/** Number property node in compiled form. */
+const nProp = (description) => ({ type: 'number', description });
 function missingRequired(args, key) {
     const value = args[key];
     if (value === undefined || value === null || value === '')
@@ -48,6 +51,9 @@ function tool(config, spec) {
             const checkFailure = spec.checkArgs ? spec.checkArgs(args) : undefined;
             if (checkFailure !== undefined) {
                 return { ok: false, schemaVersion: 1, error: { code: 'DEBRIEF_ARGS', message: checkFailure } };
+            }
+            if (spec.edit) {
+                return runEdit(config, spec.edit.entity, spec.edit.action, args, exec.signal);
             }
             if (spec.writeKind) {
                 const checked = validateWritePayload(spec.writeKind, args);
@@ -340,6 +346,89 @@ export function defineTools(config) {
             required: ['sourceType', 'content', 'instruments'],
             command: 'memory add',
             writeKind: 'memoryAdd',
+        }),
+        // ---- v2 edits: one operation, two callers (UserActions pattern) ---------
+        // Agent-initiated writes pass the DSH approval confirmation flow
+        // (tools/pre-execute `ask`); the kernel audits every write.
+        tool(config, {
+            name: 'debrief_holding_add',
+            description: 'Add a holding to the portfolio through the kernel `holdings add` command (payload on stdin). Triggers the DSH approval confirmation flow before execution; every write is recorded in the kernel user_actions audit ledger.',
+            parameters: {
+                market: sProp('Market: us, cn, hk, or crypto.'),
+                symbol: sProp('Instrument symbol.'),
+                name: sProp('Optional display name.'),
+                quantity: nProp('Held quantity.'),
+                cost: nProp('Average cost per unit.'),
+            },
+            required: ['market', 'symbol', 'quantity', 'cost'],
+            command: 'holdings add',
+            edit: { entity: 'holding', action: 'add' },
+        }),
+        tool(config, {
+            name: 'debrief_holding_update',
+            description: 'Update a holding (quantity and/or cost) through the kernel `holdings update` command (payload on stdin). Identify it by id, or by market+symbol. Triggers the DSH approval confirmation flow before execution; every write is recorded in the kernel user_actions audit ledger.',
+            parameters: {
+                id: sProp('Holding id; use id OR market+symbol.'),
+                market: sProp('Market: us, cn, hk, or crypto (with symbol).'),
+                symbol: sProp('Instrument symbol (with market).'),
+                quantity: nProp('New held quantity.'),
+                cost: nProp('New average cost per unit.'),
+            },
+            required: [],
+            command: 'holdings update',
+            edit: { entity: 'holding', action: 'update' },
+        }),
+        tool(config, {
+            name: 'debrief_holding_remove',
+            description: 'Remove a holding through the kernel `holdings remove` command (payload on stdin). Identify it by id, or by market+symbol. Triggers the DSH approval confirmation flow before execution; every write is recorded in the kernel user_actions audit ledger.',
+            parameters: {
+                id: sProp('Holding id; use id OR market+symbol.'),
+                market: sProp('Market: us, cn, hk, or crypto (with symbol).'),
+                symbol: sProp('Instrument symbol (with market).'),
+            },
+            required: [],
+            command: 'holdings remove',
+            edit: { entity: 'holding', action: 'remove' },
+        }),
+        tool(config, {
+            name: 'debrief_watchlist_add',
+            description: 'Add a watchlist entry through the kernel `watchlist add` command (payload on stdin). Triggers the DSH approval confirmation flow before execution; every write is recorded in the kernel user_actions audit ledger.',
+            parameters: {
+                market: sProp('Market: us, cn, hk, or crypto.'),
+                symbol: sProp('Instrument symbol.'),
+                name: sProp('Optional display name.'),
+                targetPrice: nProp('Optional target price that arms the alert.'),
+                alert: bProp('Optional alert state; defaults to the kernel default.'),
+            },
+            required: ['market', 'symbol'],
+            command: 'watchlist add',
+            edit: { entity: 'watchlist', action: 'add' },
+        }),
+        tool(config, {
+            name: 'debrief_watchlist_update',
+            description: 'Update a watchlist entry (target price and/or alert state) through the kernel `watchlist update` command (payload on stdin). Identify it by id, or by market+symbol. Triggers the DSH approval confirmation flow before execution; every write is recorded in the kernel user_actions audit ledger.',
+            parameters: {
+                id: sProp('Watchlist entry id; use id OR market+symbol.'),
+                market: sProp('Market: us, cn, hk, or crypto (with symbol).'),
+                symbol: sProp('Instrument symbol (with market).'),
+                targetPrice: nProp('New target price.'),
+                alert: bProp('New alert state.'),
+            },
+            required: [],
+            command: 'watchlist update',
+            edit: { entity: 'watchlist', action: 'update' },
+        }),
+        tool(config, {
+            name: 'debrief_watchlist_remove',
+            description: 'Remove a watchlist entry through the kernel `watchlist remove` command (payload on stdin). Identify it by id, or by market+symbol. Triggers the DSH approval confirmation flow before execution; every write is recorded in the kernel user_actions audit ledger.',
+            parameters: {
+                id: sProp('Watchlist entry id; use id OR market+symbol.'),
+                market: sProp('Market: us, cn, hk, or crypto (with symbol).'),
+                symbol: sProp('Instrument symbol (with market).'),
+            },
+            required: [],
+            command: 'watchlist remove',
+            edit: { entity: 'watchlist', action: 'remove' },
         }),
     ];
 }

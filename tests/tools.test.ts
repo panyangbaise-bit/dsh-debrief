@@ -8,7 +8,7 @@ const config = normalizeConfig({ cliPath: 'debrief', timeoutMs: 5000 }, {})
 describe('tool registry', () => {
   const tools = defineTools(config)
 
-  it('registers the 9 read tools plus debrief_news and the 3 whitelisted write tools', () => {
+  it('registers the read tools plus the whitelisted writes and the six approval-gated edit tools', () => {
     const names = tools.map((tool) => tool.name)
     expect(names).toEqual([
       'debrief_holdings',
@@ -24,6 +24,12 @@ describe('tool registry', () => {
       'debrief_report_create',
       'debrief_memory_compact_write',
       'debrief_memory_add',
+      'debrief_holding_add',
+      'debrief_holding_update',
+      'debrief_holding_remove',
+      'debrief_watchlist_add',
+      'debrief_watchlist_update',
+      'debrief_watchlist_remove',
     ])
   })
 

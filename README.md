@@ -12,11 +12,13 @@ decisions behind them — so the next session starts better informed.
   model-free data CLI (SQLite + data collection + JSON commands); this plugin
   bridges it with subprocess calls, renders a card for every tool call, and
   ships a read-only dashboard page. **全部模型工作都在 DSH agent 内完成**：内核是无模型的数据 CLI，插件只做 subprocess 桥接、工具卡片与只读仪表盘页面。
-- **13 tools / 工具**：9 个只读工具（`debrief_holdings`、`debrief_transactions`、
+- **19 tools / 工具**：10 个只读工具（`debrief_holdings`、`debrief_transactions`、
   `debrief_watchlist`、`debrief_instruments`、`debrief_report`、`debrief_memory`、
-  `debrief_analyze`、`debrief_jobs`、`debrief_dashboard`）+ `debrief_news` +
+  `debrief_analyze`、`debrief_jobs`、`debrief_dashboard`、`debrief_news`）+
   3 个白名单写工具（`debrief_report_create`、`debrief_memory_compact_write`、
-  `debrief_memory_add`，仅供定时 skill 会话使用，写操作入内核 `user_actions` 审计）。
+  `debrief_memory_add`，仅供定时 skill 会话使用）+ 6 个 v2 审批门控编辑工具
+  （`debrief_holding_add/update/remove`、`debrief_watchlist_add/update/remove`，
+  对话编辑经 DSH 审批确认流，写操作入内核 `user_actions` 审计）。
 - **5 scheduled skills / 定时技能**：`debrief-after-market`（盘后分析 ×4 市场）、
   `debrief-news`（每小时新闻摘要）、`debrief-weekly`（周六周复盘）、
   `debrief-monthly`（月度复盘）、`debrief-compact`（每日记忆压缩）。
@@ -24,8 +26,9 @@ decisions behind them — so the next session starts better informed.
   8 个 DSH Schedule 任务（RRULE 显式 `TZID=Asia/Shanghai`、`new_once` 专属会话）。
 - **UI**：keyed `tool.call.toolview` 卡片（持仓/成交/监察表/报告 SVG 图/记忆证据/
   任务进度/运行台账/仪表盘/新闻/写回结果）+ Dashboard 页面（KPI 行、资产/收益折线、
-  成分环形图、持仓表、监察表、时间范围 chips、添加入口占位 v2）。纯 SVG、主题 token、
-  中英双语、IntersectionObserver 懒加载。
+  成分环形图、持仓表、监察表、时间范围 chips）。v2 起 Dashboard 支持添加/编辑/删除
+  持仓与自选：市场 chips + 搜索式选标器 + 表单弹窗、删除二次确认、toast 反馈；
+  对话侧同名工具走 DSH 审批确认流。纯 SVG、主题 token、中英双语、IntersectionObserver 懒加载。
 
 ## Quick start / 快速开始
 
