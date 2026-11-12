@@ -11,11 +11,11 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { runCli } from './cli.js'
 import type {
-  CommandDefinition,
   DebriefContext,
   ScheduleCreateRequest,
   ScheduleListResult,
   SchedulePreset,
+  ScheduleService,
 } from './types.js'
 import type { DebriefConfig } from './config.js'
 
@@ -74,11 +74,6 @@ export interface SetupOutcome {
   failed: Array<{ title: string; message: string }>
 }
 
-interface ScheduleService {
-  list(request: { limit?: number; offset?: number }): Promise<ScheduleListResult>
-  create(request: ScheduleCreateRequest): Promise<{ id: string; title: string; scheduledAt?: string }>
-}
-
 export async function runSetup(
   schedule: ScheduleService,
   config: DebriefConfig,
@@ -119,19 +114,13 @@ export function registerSetupCommand(
   config: DebriefConfig,
   presets: SchedulePreset[],
 ): () => void {
-  const commands = ctx.get('commands') as { register(definition: CommandDefinition): () => void } | undefined
-  const schedule = ctx.get('schedule') as ScheduleService | undefined
-  if (!commands || !schedule) {
-    console.warn('[dsh-debrief] commands or schedule service unavailable — `debrief-setup` not registered')
-    return () => {}
-  }
   try {
-    return commands.register({
+    return ctx.commands.register({
       name: SETUP_COMMAND_NAME,
       description: '校验 debrief 内核并幂等注册全部定时复盘任务（盘后 ×4 市场 / 新闻 / 周复盘 / 月度 / 记忆压缩）',
       async handler() {
         try {
-          const outcome = await runSetup(schedule, config, presets)
+          const outcome = await runSetup(ctx.schedule, config, presets)
           const lines = ['debrief-setup 完成']
           if (outcome.created.length > 0) {
             lines.push('已注册：')

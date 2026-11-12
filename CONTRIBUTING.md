@@ -12,7 +12,7 @@
 
 ```sh
 npm install
-npm run verify   # typecheck + lint + format + test + build 全绿才可提交
+npm run verify   # typecheck + lint + format + build（含 client 产物 export 剥离）+ test 全绿才可提交
 ```
 
 ## 质量门禁（合并必须全绿）

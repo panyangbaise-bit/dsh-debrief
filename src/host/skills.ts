@@ -10,9 +10,9 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { DebriefContext, SkillRegistrationInput } from './types.js'
 
-const SKILLS_DIR = new URL('../../skills/', import.meta.url)
-
 export interface LoadedSkill extends SkillRegistrationInput {}
+
+const SKILLS_DIR = new URL('../../skills/', import.meta.url)
 
 export function loadSkills(): LoadedSkill[] {
   const skills: LoadedSkill[] = []
@@ -70,15 +70,10 @@ export function parseSkillMarkdown(content: string, fileName: string): LoadedSki
 }
 
 export function registerSkills(ctx: DebriefContext, skills: LoadedSkill[]): () => void {
-  const registry = ctx.get('skills') as { register(skill: SkillRegistrationInput): () => void } | undefined
-  if (!registry) {
-    console.warn('[dsh-debrief] skills service unavailable — skill registration skipped')
-    return () => {}
-  }
   const disposers: Array<() => void> = []
   for (const skill of skills) {
     try {
-      disposers.push(registry.register(skill))
+      disposers.push(ctx.skills.register(skill))
     } catch (error) {
       console.warn(
         `[dsh-debrief] skill ${skill.name} registration failed:`,

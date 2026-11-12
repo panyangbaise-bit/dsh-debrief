@@ -14,7 +14,13 @@ import { registerDashboardRoute } from './dashboard.js'
 import type { DebriefContext, ToolDefinition } from './types.js'
 import type { DebriefConfig } from './config.js'
 
-export const inject = ['tools']
+/**
+ * Hard dependencies per the inspected access contracts: a missing service
+ * keeps the plugin inactive instead of half-activating (the earlier ctx.get
+ * form silently skipped the setup command and the dashboard route on the
+ * server profile). Registration calls stay try/catch-guarded as a safety net.
+ */
+export const inject = ['tools', 'commands', 'schedule', 'connection', 'skills']
 
 export { normalizeConfig }
 export type { DebriefConfig } from './config.js'

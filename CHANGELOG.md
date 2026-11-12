@@ -57,3 +57,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   old name threw during registration and failed the whole plugin activation.
   Command registration is now also wrapped so a future registration failure
   degrades gracefully instead of taking the plugin down.
+- Removed top-level `export` statements from the built `dist/client.js`: the
+  Web Host wraps the served client file inside a `factory(require)` function
+  body, where module syntax is a SyntaxError ("Failed to load plugins …
+  import failed"). A zero-dependency postbuild step
+  (`scripts/strip-client-exports.mjs`) strips declaration exports from the
+  artifact (the TypeScript source keeps them for the vitest imports), verifies
+  zero remaining top-level module syntax, and compile-checks the result inside
+  the loader's exact wrapper shape.
+- Switched service access to the inspected hard-dependency form —
+  `inject: ['tools', 'commands', 'schedule', 'connection', 'skills']` with
+  `ctx.commands` / `ctx.schedule` / `ctx.connection` / `ctx.skills`. The
+  previous `ctx.get(...)` fallback could not reach commands/schedule/connection
+  on the server profile, so `debrief-setup` and the dashboard route were
+  silently never registered (startup journal warnings). Registration calls
+  remain try/catch-guarded as a safety net.

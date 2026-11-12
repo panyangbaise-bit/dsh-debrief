@@ -23,12 +23,6 @@ function jsonResponse(body: unknown, status: number): Response {
 
 export function registerDashboardRoute(ctx: DebriefContext, config: DebriefConfig): () => void {
   if (config.enableDashboardRoute === false) return () => {}
-  const connection = ctx.get('connection') as
-    { fetch?: { register(route: ConnectionFetchRoute): () => Promise<void> } } | undefined
-  if (!connection?.fetch) {
-    console.warn('[dsh-debrief] connection service unavailable — dashboard route not registered')
-    return () => {}
-  }
   const route: ConnectionFetchRoute = {
     path: DASHBOARD_PATH,
     methods: ['GET', 'HEAD'],
@@ -52,7 +46,7 @@ export function registerDashboardRoute(ctx: DebriefContext, config: DebriefConfi
   }
   let unregister: () => Promise<void>
   try {
-    unregister = connection.fetch.register(route)
+    unregister = ctx.connection.fetch.register(route)
   } catch (error) {
     console.warn('[dsh-debrief] dashboard route registration failed:', error instanceof Error ? error.message : error)
     return () => {}

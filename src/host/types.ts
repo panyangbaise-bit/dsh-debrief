@@ -96,10 +96,34 @@ export interface ConnectionFetchRoute {
   fetch: (request: Request) => Promise<Response>
 }
 
+export interface ScheduleService {
+  list(request: { limit?: number; offset?: number }): Promise<ScheduleListResult>
+  create(request: ScheduleCreateRequest): Promise<ScheduleCatalogEntry>
+}
+
+/**
+ * Services consumed through the plugin's `inject` declaration
+ * (['tools', 'commands', 'schedule', 'connection', 'skills']). The inspect
+ * contracts document the hard-dependency form `inject: [key]` → `ctx[key]`;
+ * the optional `ctx.get(key)` form proved unreachable for commands/schedule/
+ * connection on the server profile, which silently disabled the setup command
+ * and the dashboard route.
+ */
 export interface DebriefContext {
-  get(name: string): unknown | undefined
   effect(setup: () => void | (() => void), label?: string): void
   tools: {
     register(definition: ToolDefinition): () => void
+  }
+  skills: {
+    register(skill: SkillRegistrationInput): () => void
+  }
+  commands: {
+    register(definition: CommandDefinition): () => void
+  }
+  schedule: ScheduleService
+  connection: {
+    fetch: {
+      register(route: ConnectionFetchRoute): () => Promise<void>
+    }
   }
 }
