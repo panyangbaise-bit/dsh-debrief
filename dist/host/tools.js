@@ -1,0 +1,345 @@
+/**
+ * Registry-ready tool definitions in the compiled raw-schema form, mirroring
+ * what `defineTool` produces for the same author input. Nine read tools
+ * (including the dashboard aggregate and the news feed) plus three whitelisted
+ * write tools used by the scheduled debrief skills.
+ */
+import { runCli } from './cli.js';
+import { validate, arr, obj, opt, s } from './schema.js';
+const OUT_SCHEMA = { description: 'debrief kernel envelope' };
+function jsonOut(_args, value) {
+    return [{ type: 'text', text: JSON.stringify(value) }];
+}
+/** String property node in compiled form. */
+const sProp = (description) => ({ type: 'string', description });
+/** Integer property node in compiled form. */
+const iProp = (description) => ({ type: 'integer', description });
+/** Boolean property node in compiled form. */
+const bProp = (description) => ({ type: 'boolean', description });
+function missingRequired(args, key) {
+    const value = args[key];
+    if (value === undefined || value === null || value === '')
+        return true;
+    if (Array.isArray(value) && value.length === 0)
+        return true;
+    return false;
+}
+function tool(config, spec) {
+    return {
+        name: spec.name,
+        description: spec.description,
+        parameters: {
+            type: 'object',
+            properties: spec.parameters,
+            ...(spec.required.length > 0 ? { required: spec.required } : {}),
+        },
+        output: { schema: OUT_SCHEMA, render: jsonOut },
+        async execute(rawArgs, exec) {
+            const args = (rawArgs && typeof rawArgs === 'object' ? rawArgs : {});
+            for (const key of spec.required) {
+                if (missingRequired(args, key)) {
+                    return {
+                        ok: false,
+                        schemaVersion: 1,
+                        error: { code: 'DEBRIEF_ARGS', message: `missing required argument ${key}` },
+                    };
+                }
+            }
+            const checkFailure = spec.checkArgs ? spec.checkArgs(args) : undefined;
+            if (checkFailure !== undefined) {
+                return { ok: false, schemaVersion: 1, error: { code: 'DEBRIEF_ARGS', message: checkFailure } };
+            }
+            if (spec.writeKind) {
+                const checked = validateWritePayload(spec.writeKind, args);
+                if (!checked.ok || checked.stdin === undefined) {
+                    return {
+                        ok: false,
+                        schemaVersion: 1,
+                        error: checked.error ?? { code: 'DEBRIEF_ARGS', message: 'invalid write payload' },
+                    };
+                }
+                return runCli(config, [spec.command], { signal: exec.signal, stdin: checked.stdin });
+            }
+            if (spec.argsOf) {
+                return runCli(config, [spec.command, ...spec.argsOf(args)], { signal: exec.signal });
+            }
+            return runCli(config, [spec.command], { signal: exec.signal });
+        },
+    };
+}
+// ---- write payload shapes (validated before they reach the CLI) -------------
+const metricShape = obj({ label: s(), value: s() }, ['label', 'value']);
+const chartShape = obj({ title: opt(s()), unit: opt(s()), points: arr({ type: 'number' }) }, ['points']);
+const evidenceRefShape = obj({ docId: { type: 'integer' }, quote: opt(s()) }, ['docId']);
+export function reportCreatePayload(args) {
+    return JSON.stringify({
+        market: args.market,
+        title: args.title,
+        summary: args.summary,
+        ...(typeof args.fullText === 'string' && args.fullText !== '' ? { fullText: args.fullText } : {}),
+        ...(Array.isArray(args.metrics) && args.metrics.length > 0 ? { metrics: args.metrics } : {}),
+        ...(args.chart && typeof args.chart === 'object' ? { chart: args.chart } : {}),
+        ...(typeof args.jobId === 'string' && args.jobId !== '' ? { jobId: args.jobId } : {}),
+    });
+}
+export function compactWritePayload(args) {
+    return JSON.stringify({
+        topic: args.topic,
+        instruments: args.instruments,
+        summary: args.summary,
+        evidenceRefs: args.evidenceRefs,
+        timeRange: args.timeRange,
+        ...(typeof args.confidence === 'string' && args.confidence !== '' ? { confidence: args.confidence } : {}),
+        ...(typeof args.caveats === 'string' && args.caveats !== '' ? { caveats: args.caveats } : {}),
+    });
+}
+export function memoryAddPayload(args) {
+    return JSON.stringify({
+        sourceType: args.sourceType,
+        content: args.content,
+        instruments: args.instruments,
+        ...(typeof args.occurredAt === 'string' && args.occurredAt !== '' ? { occurredAt: args.occurredAt } : {}),
+    });
+}
+/** Export the payload shapes for the test suite. */
+export const writePayloadShapes = {
+    reportCreate: obj({
+        market: s(),
+        title: s(),
+        summary: s(),
+        fullText: opt(s()),
+        metrics: opt(arr(metricShape)),
+        chart: opt(chartShape),
+        jobId: opt(s()),
+    }, ['market', 'title', 'summary']),
+    compactWrite: obj({
+        topic: s(),
+        instruments: arr(s()),
+        summary: s(),
+        evidenceRefs: arr(evidenceRefShape),
+        timeRange: obj({ from: s(), to: s() }, ['from', 'to']),
+        confidence: opt(s()),
+        caveats: opt(s()),
+    }, ['topic', 'instruments', 'summary', 'evidenceRefs', 'timeRange']),
+    memoryAdd: obj({
+        sourceType: s(),
+        content: s(),
+        instruments: arr(s()),
+        occurredAt: opt(s()),
+    }, ['sourceType', 'content', 'instruments']),
+};
+const WRITE_NOTE = ' Whitelisted write tool for scheduled debrief skill sessions; every write is recorded in the kernel user_actions audit ledger.';
+/** Validate a write payload against its declared shape and return the CLI stdin JSON. */
+export function validateWritePayload(kind, args) {
+    const result = validate(writePayloadShapes[kind], args);
+    if (!result.ok) {
+        return { ok: false, error: { code: 'DEBRIEF_ARGS', message: `invalid payload: ${result.path} ${result.reason}` } };
+    }
+    const stdin = kind === 'reportCreate'
+        ? reportCreatePayload(args)
+        : kind === 'compactWrite'
+            ? compactWritePayload(args)
+            : memoryAddPayload(args);
+    return { ok: true, stdin };
+}
+// ---- definitions -------------------------------------------------------------
+export function defineTools(config) {
+    return [
+        tool(config, {
+            name: 'debrief_holdings',
+            description: 'Read the current portfolio holdings: symbol, name, quantity, cost, last price, market value, unrealized PnL, and weight.',
+            parameters: { status: sProp("Only open positions when 'open'; all positions when omitted.") },
+            required: [],
+            command: 'holdings',
+            argsOf: (a) => (a.status ? ['--status', String(a.status)] : []),
+        }),
+        tool(config, {
+            name: 'debrief_transactions',
+            description: 'List executed trades, newest first, with pagination.',
+            parameters: {
+                ticker: sProp('Optional symbol filter, e.g. AAPL.'),
+                limit: iProp('Page size. Default 20, max 100.'),
+                offset: iProp('Zero-based row offset. Default 0.'),
+            },
+            required: [],
+            command: 'transactions',
+            argsOf: (a) => [
+                ...(a.ticker ? ['--ticker', String(a.ticker)] : []),
+                ...(a.limit ? ['--limit', String(a.limit)] : []),
+                ...(a.offset ? ['--offset', String(a.offset)] : []),
+            ],
+        }),
+        tool(config, {
+            name: 'debrief_watchlist',
+            description: 'Read the watchlist: instruments under observation with target price, distance to target, and alert state.',
+            parameters: {},
+            required: [],
+            command: 'watchlist',
+        }),
+        tool(config, {
+            name: 'debrief_instruments',
+            description: 'Search investable instruments for adding holdings or watchlist entries. Stocks/ETFs/funds resolve through the local akshare catalog with a live suggest fallback; crypto resolves through CoinGecko. Returns symbol, name, market, currency, and asset class per match.',
+            parameters: {
+                market: sProp('One of: us, cn, hk, crypto.'),
+                query: sProp('Code, name, or pinyin fragment; at least 2 characters.'),
+            },
+            required: ['market', 'query'],
+            command: 'instruments',
+            argsOf: (a) => ['search', '--market', String(a.market), '--query', String(a.query)],
+        }),
+        tool(config, {
+            name: 'debrief_report',
+            description: 'Read an analysis report from the report center: summary, metrics, and chart payload references.',
+            parameters: {
+                id: sProp('Report id; takes precedence over market.'),
+                market: sProp('One of: us, cn, hk, crypto. Latest report of that market when id is omitted.'),
+            },
+            required: [],
+            command: 'report',
+            argsOf: (a) => (a.id ? ['--id', String(a.id)] : ['latest', ...(a.market ? ['--market', String(a.market)] : [])]),
+        }),
+        tool(config, {
+            name: 'debrief_memory',
+            description: 'Search long-term and short-term investment memory. Long-term hits come first as structured summaries with confidence and evidence citations; short-term hits follow as fine-grained evidence snapshots. With compactCandidates=true, returns the out-of-window uncompacted candidates for the daily compaction skill instead.',
+            parameters: {
+                query: sProp('Topic, instrument, or decision phrase to retrieve. Optional when compactCandidates is true.'),
+                compactCandidates: bProp('Return the out-of-window compaction candidate list (for the debrief-compact skill).'),
+            },
+            required: [],
+            command: 'memory',
+            argsOf: (a) => a.compactCandidates === true ? ['compact-candidates'] : ['search', '--query', String(a.query ?? '')],
+            checkArgs: (a) => a.compactCandidates === true || (typeof a.query === 'string' && a.query.trim() !== '')
+                ? undefined
+                : 'query is required unless compactCandidates is true',
+        }),
+        tool(config, {
+            name: 'debrief_analyze',
+            description: 'Prepare an after-market analysis input package for one market: recent quotes, news, and candidate memory evidence. Synthesize the conclusion yourself from the package, then present it; the package is bounded and ready to read.',
+            parameters: { market: sProp('One of: us, cn, hk, crypto.') },
+            required: ['market'],
+            command: 'analysis',
+            argsOf: (a) => ['prepare', '--market', String(a.market)],
+        }),
+        tool(config, {
+            name: 'debrief_jobs',
+            description: 'List recent scheduled-task runs from the job ledger: kind, time, status, duration, and error code when failed.',
+            parameters: {},
+            required: [],
+            command: 'job',
+            argsOf: () => ['list'],
+        }),
+        tool(config, {
+            name: 'debrief_dashboard',
+            description: 'Read the dashboard aggregate: KPIs (total assets, daily and total return), equity and cumulative-return series, portfolio composition, holdings, and watchlist in one payload.',
+            parameters: { range: sProp('Series length in days: 30, 90, 200, or 365. Default 90.') },
+            required: [],
+            command: 'dashboard',
+            argsOf: (a) => (a.range ? ['--range', String(a.range)] : []),
+        }),
+        tool(config, {
+            name: 'debrief_news',
+            description: 'Read the latest collected market news feed (raw fetches by the kernel scheduler, no summaries): title, source, published time, and optional market filter.',
+            parameters: {
+                market: sProp('Optional market filter: us, cn, hk, crypto. All markets when omitted.'),
+                limit: iProp('Maximum items. Default 20, max 100.'),
+            },
+            required: [],
+            command: 'news',
+            argsOf: (a) => [
+                'latest',
+                ...(a.market ? ['--market', String(a.market)] : []),
+                ...(a.limit ? ['--limit', String(a.limit)] : []),
+            ],
+        }),
+        tool(config, {
+            name: 'debrief_report_create',
+            description: 'Write an analysis report produced by the DSH agent back to the kernel report center and mark the job ledger entry. Runs `report create --json` with the payload on stdin.' +
+                WRITE_NOTE,
+            parameters: {
+                market: sProp('Market the report covers: us, cn, hk, crypto, or weekly/monthly for reviews.'),
+                title: sProp('Report title.'),
+                summary: sProp('Structured conclusion: one-line summary, key changes, portfolio impact, action signals.'),
+                fullText: sProp('Optional full analysis text.'),
+                metrics: {
+                    type: 'array',
+                    description: 'Optional metric rows.',
+                    items: {
+                        type: 'object',
+                        description: 'A labeled metric.',
+                        properties: { label: sProp('Metric label.'), value: sProp('Metric value.') },
+                        required: ['label', 'value'],
+                    },
+                },
+                chart: {
+                    type: 'object',
+                    description: 'Optional SVG chart payload.',
+                    properties: {
+                        title: sProp('Chart title.'),
+                        unit: sProp('Value unit.'),
+                        points: { type: 'array', description: 'Sampled series points.', items: { type: 'number' } },
+                    },
+                    required: ['points'],
+                },
+                jobId: sProp('Optional job_runs ledger id from debrief_analyze; links the report to its run.'),
+            },
+            required: ['market', 'title', 'summary'],
+            command: 'report create',
+            writeKind: 'reportCreate',
+        }),
+        tool(config, {
+            name: 'debrief_memory_compact_write',
+            description: 'Write one compacted long-term memory summary generated by the DSH agent back to the kernel; same topic re-compacts as version+1. Runs `memory compact-write --json` with the payload on stdin.' +
+                WRITE_NOTE,
+            parameters: {
+                topic: sProp('Stable topic key, e.g. position-aapl-rationale.'),
+                instruments: {
+                    type: 'array',
+                    description: 'Related instruments.',
+                    items: sProp('Symbol.'),
+                },
+                summary: sProp('Structured summary: conclusion, rationale, conditions.'),
+                evidenceRefs: {
+                    type: 'array',
+                    description: 'Short-term evidence citations; each docId must come from compact-candidates.',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            docId: { type: 'integer', description: 'Memory document id.' },
+                            quote: sProp('Optional short quote from the source document.'),
+                        },
+                        required: ['docId'],
+                    },
+                },
+                timeRange: {
+                    type: 'object',
+                    description: 'Covered time window.',
+                    properties: { from: sProp('ISO start.'), to: sProp('ISO end.') },
+                    required: ['from', 'to'],
+                },
+                confidence: sProp('high, medium, or low.'),
+                caveats: sProp('Known limitations and unknowns.'),
+            },
+            required: ['topic', 'instruments', 'summary', 'evidenceRefs', 'timeRange'],
+            command: 'memory compact-write',
+            writeKind: 'compactWrite',
+        }),
+        tool(config, {
+            name: 'debrief_memory_add',
+            description: 'Append one decision or observation snapshot to short-term memory evidence (decision sedimentation from the session log or kernel events). Runs `memory add --json` with the payload on stdin.' +
+                WRITE_NOTE,
+            parameters: {
+                sourceType: sProp('Snapshot kind: decision, trade, report, note, or conversation.'),
+                content: sProp('Snapshot text; quote the original decision verbatim when available.'),
+                instruments: {
+                    type: 'array',
+                    description: 'Related instruments.',
+                    items: sProp('Symbol.'),
+                },
+                occurredAt: sProp('Optional ISO timestamp; defaults to now.'),
+            },
+            required: ['sourceType', 'content', 'instruments'],
+            command: 'memory add',
+            writeKind: 'memoryAdd',
+        }),
+    ];
+}

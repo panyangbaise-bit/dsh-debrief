@@ -68,5 +68,14 @@
     "prettier": "^3.6.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/panyangbaise-bit/dsh-debrief.git"
+  },
+  "homepage": "https://github.com/panyangbaise-bit/dsh-debrief#readme",
+  "bugs": {
+    "url": "https://github.com/panyangbaise-bit/dsh-debrief/issues"
+  },
+  "author": "Peter Pan"
 }
