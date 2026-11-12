@@ -23,7 +23,7 @@
 3. 个别任务「注册失败」→ 按报错修正 RRULE（时区必须显式 `TZID=Asia/Shanghai`，DTSTART 必须是该时区的真实本地时间）。
 4. 重跑一次即可（幂等：已注册的按标题跳过）。
 
-## Dashboard 页面打不开 / 加载失败
+## 投资组合页面打不开 / 加载失败
 
 - 页面显示错误码 + 重试按钮：先点重试；持续失败检查内核 `debrief dashboard --json --range 90` 是否能直接跑通。
 - 若路由未注册（Host 日志有 `connection service unavailable`），确认 web profile 完整。
@@ -69,7 +69,7 @@ Cards never retry on their own — ask the Agent to retry.
    DTSTART must be a real local time in that zone).
 4. Re-running is safe — registration is idempotent (existing titles are skipped).
 
-## Dashboard page does not open / fails to load
+## Portfolio page does not open / fails to load
 
 - Use the in-page retry first; if it persists, run
   `debrief dashboard --json --range 90` directly.

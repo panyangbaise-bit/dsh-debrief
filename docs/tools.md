@@ -73,7 +73,7 @@ agent 基于输入包自行生成结论（内核无 LLM）。
 
 无参数。CLI：`debrief job list --json` → `{ items[] }`（kind/at/status/durationSec/errorCode）
 
-### debrief_dashboard · 仪表盘聚合
+### debrief_dashboard · 投资组合聚合
 
 ```json
 { "range": "30|90|200|365" }
@@ -143,7 +143,7 @@ CLI：`debrief memory add --json`（stdin）→ `{ docId }`
 
 ## v2 编辑工具（审批门控 · 对话与 UI 同一实现）
 
-六个编辑工具与 Dashboard 弹窗共用同一个 Host 操作（UserActions 单一实现模式）：
+六个编辑工具与 投资组合页面弹窗共用同一个 Host 操作（UserActions 单一实现模式）：
 Agent 发起的写操作先经过 DSH 审批确认流（`tools/pre-execute` 返回 `ask`；
 审批不可用时框架把 ask 转为拒绝，写操作被结构化拒绝、绝不静默执行）；
 UI 提交经认证路由 `POST /api/debrief/mutate`（人工确认 = 弹窗提交 + 删除二次确认）。
@@ -167,7 +167,7 @@ UI 提交经认证路由 `POST /api/debrief/mutate`（人工确认 = 弹窗提�
 
 | 路由                                            | 方法 | 说明                                                                          |
 | ----------------------------------------------- | ---- | ----------------------------------------------------------------------------- |
-| `/api/debrief/dashboard?range=30\|90\|200\|365` | GET  | 仪表盘聚合（只读）                                                            |
+| `/api/debrief/dashboard?range=30\|90\|200\|365` | GET  | 投资组合聚合（只读）                                                          |
 | `/api/debrief/instruments?market=&query=`       | GET  | 选标搜索（只读；弹窗选标器数据源）                                            |
 | `/api/debrief/mutate`                           | POST | `{entity:holding\|watchlist, action:add\|update\|remove, payload}` → 内核写入 |
 
@@ -226,7 +226,7 @@ job state machine. Interactive writes (add holding / watchlist) are a v2 feature
 
 ## v2 edit tools (approval-gated; conversation and UI share one implementation)
 
-The six edit tools and the Dashboard modal execute the same Host operation
+The six edit tools and the Portfolio modal execute the same Host operation
 (UserActions single-implementation pattern). Agent-initiated writes pass the
 DSH approval confirmation flow first (`tools/pre-execute` returns `ask`; without
 approval support the framework turns the ask into a denial, so the write is
@@ -254,7 +254,7 @@ both or neither is `DEBRIEF_ARGS`.
 
 | Route                                           | Method | Purpose                                    |
 | ----------------------------------------------- | ------ | ------------------------------------------ |
-| `/api/debrief/dashboard?range=30\|90\|200\|365` | GET    | Dashboard aggregate (read-only)            |
+| `/api/debrief/dashboard?range=30\|90\|200\|365` | GET    | Portfolio aggregate (read-only)            |
 | `/api/debrief/instruments?market=&query=`       | GET    | Instrument search (picker data source)     |
 | `/api/debrief/mutate`                           | POST   | `{entity, action, payload}` → kernel write |
 

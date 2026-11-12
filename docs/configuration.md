@@ -32,7 +32,7 @@
 
 - 涨跌色遵循宿主主题约定（CN 红涨绿跌），颜色全部走 theme token（`--dsw-alias-*`）；
   `ui.upDown` 的两套色板（cn / intl）由宿主控制，插件跟随 token，不额外配置。
-- 卡片与 Dashboard 页面文案走 zh/en locale，缺省回退 zh。
+- 卡片与投资组合页面文案走 zh/en locale，缺省回退 zh。
 
 ---
 

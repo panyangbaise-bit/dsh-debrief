@@ -54,7 +54,7 @@ dsh-debrief/
   `new_once` 每任务一个专属会话、串行交付、错过只补最新；时区显式 `TZID=Asia/Shanghai`。
 - **白名单写**：3 个写工具仅定时 skill 会话使用；payload 经 client/server 双端 schema 校验；
   内核 `user_actions` 审计 + 幂等 job 状态机（prepare→running→done/failed+retry）。
-- **Dashboard 数据**：走 `ctx.connection.fetch` 的认证 exact route（owner cookie），
+- **投资组合（Portfolio）数据**：走 `ctx.connection.fetch` 的认证 exact route（owner cookie），
   不用裸 `webServer.register`（后者无 Peer、无认证——与任务字面表述的偏差，以 inspect 到的现行契约为准）。
 - **locale**：Host 导出 locale/*.json（meta）；Client 通过 `ctx.locale.register('dsh-debrief', {zh,en})`
   注册字典、视图收 `t` prop；缺省回退 zh。
@@ -95,7 +95,7 @@ dsh-debrief/
 - **Whitelisted writes**: the 3 write tools are for scheduled skill sessions
   only; payloads are validated on both sides; the kernel audits `user_actions`
   and runs an idempotent job state machine.
-- **Dashboard data**: served through the authenticated exact route of
+- **Portfolio data**: served through the authenticated exact route of
   `ctx.connection.fetch` (owner cookie), not a raw `webServer.register` route
   (which carries no Peer and no authentication — a deliberate deviation from
   the task's literal wording, resolved against the inspected contracts).

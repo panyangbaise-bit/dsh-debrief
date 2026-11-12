@@ -79,7 +79,7 @@ const zh = {
     'jobs.failed': '失败',
     'jobs.running': '运行中',
     'jobs.hint': '任务由 DSH Schedule（new_once 专属会话）触发，状态写回内核 job_runs 台账。',
-    'dashboard.title': '总览仪表盘',
+    'dashboard.title': '投资组合',
     'dashboard.range': '近 {range} 天',
     'dashboard.totalAssets': '总资产',
     'dashboard.dayPnl': '今日收益',
@@ -105,9 +105,9 @@ const zh = {
     'chart.daysAgo': '{count} 天前',
     'chart.latest': '最新',
     'chart.donutAria': '组合成分环形图',
-    'page.panel': '复盘仪表盘',
+    'page.panel': '投资组合',
     'page.loading': '加载中…',
-    'page.loadFailed': '仪表盘加载失败',
+    'page.loadFailed': '投资组合加载失败',
     'page.empty': '内核暂无数据',
     'page.retry': '重试',
     'page.range30': '近 30 天',
@@ -253,7 +253,7 @@ const en = {
     'jobs.failed': 'Failed',
     'jobs.running': 'Running',
     'jobs.hint': 'Tasks are triggered by DSH Schedule (new_once dedicated sessions); status is written back to the kernel job_runs ledger.',
-    'dashboard.title': 'Dashboard',
+    'dashboard.title': 'Portfolio',
     'dashboard.range': 'Last {range} days',
     'dashboard.totalAssets': 'Total assets',
     'dashboard.dayPnl': 'Day return',
@@ -279,9 +279,9 @@ const en = {
     'chart.daysAgo': '{count} days ago',
     'chart.latest': 'Latest',
     'chart.donutAria': 'Portfolio composition donut',
-    'page.panel': 'Debrief dashboard',
+    'page.panel': 'Portfolio',
     'page.loading': 'Loading…',
-    'page.loadFailed': 'Dashboard load failed',
+    'page.loadFailed': 'Portfolio failed to load',
     'page.empty': 'No data from the kernel',
     'page.retry': 'Retry',
     'page.range30': '30 days',
@@ -373,10 +373,23 @@ function interpolate(template, params) {
 function dictT(dict) {
     return (key, params) => interpolate(dict[key] ?? key, params);
 }
-/** Prefer the injected locale `t`; fall back to the zh dictionary. */
+/**
+ * Prefer the injected locale `t`; when it is missing or the current language
+ * does not cover a key (it returns the key itself or an empty string), fall
+ * back to the zh dictionary.
+ */
 function pickT(injected) {
-    if (typeof injected === 'function')
-        return injected;
+    if (typeof injected === 'function') {
+        const base = injected;
+        return (key, params) => {
+            const value = base(key, params);
+            if (value === key || value === '') {
+                const fallback = zh[key] ?? key;
+                return interpolate(fallback, params);
+            }
+            return value;
+        };
+    }
     return dictT(zh);
 }
 const s = () => ({ type: 'string' });
@@ -694,7 +707,7 @@ function clientFactory(requireFn) {
 .dbr-chips{display:flex;gap:6px;flex-wrap:wrap}
 .dbr-chip{font-size:12px;padding:4px 12px;border-radius:999px;border:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dbr-chip.active{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1)}
-.dbr-page-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dbr-page-grid{display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.55fr);gap:12px}
 .dbr-page-grid .wide{grid-column:1/-1}
 .dbr-panel{background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius);padding:12px 14px;min-width:0}
 .dbr-panel-title{display:flex;align-items:center;font-size:12.5px;font-weight:600;margin-bottom:8px;gap:8px}

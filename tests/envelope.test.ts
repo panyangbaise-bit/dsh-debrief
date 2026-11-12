@@ -62,12 +62,26 @@ describe('locale dictionaries', () => {
   it('falls back to the zh dictionary when no injected t is available', () => {
     const t = pickT(undefined)
     expect(t('holdings.title')).toBe('持仓总览')
+    expect(t('page.panel')).toBe('投资组合')
     expect(dictT(zh)('missing.key')).toBe('missing.key')
+  })
+
+  it('falls back to zh when the active locale does not cover a key', () => {
+    // A locale service for an uncovered language returns the key itself (or an
+    // empty string) for keys its dictionary lacks — resolve from zh instead.
+    const keyEchoing = (key: string) => key
+    const emptyReturning = () => ''
+    expect(pickT(keyEchoing)('page.loadFailed')).toBe('投资组合加载失败')
+    expect(pickT(keyEchoing)('dashboard.title', {})).toBe('投资组合')
+    expect(pickT(emptyReturning)('page.panel')).toBe('投资组合')
   })
 
   it('prefers the injected locale service', () => {
     const injected = (key: string) => (key === 'holdings.title' ? 'POSITIONS' : key)
     expect(pickT(injected)('holdings.title')).toBe('POSITIONS')
+    // A covered key in another language never falls back.
+    const fullEnglish = dictT(en as Record<string, string>)
+    expect(pickT(fullEnglish)('page.panel')).toBe('Portfolio')
   })
 })
 

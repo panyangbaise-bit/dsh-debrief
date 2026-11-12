@@ -11,7 +11,7 @@ decisions behind them — so the next session starts better informed.
 - **All model work runs in the DSH agent.** The `debrief` kernel is a
   model-free data CLI (SQLite + data collection + JSON commands); this plugin
   bridges it with subprocess calls, renders a card for every tool call, and
-  ships a read-only dashboard page. **全部模型工作都在 DSH agent 内完成**：内核是无模型的数据 CLI，插件只做 subprocess 桥接、工具卡片与只读仪表盘页面。
+  ships a read-only Portfolio page. **全部模型工作都在 DSH agent 内完成**：内核是无模型的数据 CLI，插件只做 subprocess 桥接、工具卡片与只读「投资组合」页面（Portfolio）。
 - **19 tools / 工具**：10 个只读工具（`debrief_holdings`、`debrief_transactions`、
   `debrief_watchlist`、`debrief_instruments`、`debrief_report`、`debrief_memory`、
   `debrief_analyze`、`debrief_jobs`、`debrief_dashboard`、`debrief_news`）+
@@ -25,8 +25,8 @@ decisions behind them — so the next session starts better informed.
 - **Schedule presets / 任务预置**：`/debrief-setup` 一条命令校验内核并幂等注册
   8 个 DSH Schedule 任务（RRULE 显式 `TZID=Asia/Shanghai`、`new_once` 专属会话）。
 - **UI**：keyed `tool.call.toolview` 卡片（持仓/成交/监察表/报告 SVG 图/记忆证据/
-  任务进度/运行台账/仪表盘/新闻/写回结果）+ Dashboard 页面（KPI 行、资产/收益折线、
-  成分环形图、持仓表、监察表、时间范围 chips）。v2 起 Dashboard 支持添加/编辑/删除
+  任务进度/运行台账/投资组合/新闻/写回结果）+ 投资组合页面（Portfolio，KPI 行、资产/收益折线、
+  成分环形图、持仓表、监察表、时间范围 chips）。v2 起投资组合页面支持添加/编辑/删除
   持仓与自选：市场 chips + 搜索式选标器 + 表单弹窗、删除二次确认、toast 反馈；
   对话侧同名工具走 DSH 审批确认流。纯 SVG、主题 token、中英双语、IntersectionObserver 懒加载。
 
@@ -67,7 +67,7 @@ echo '{"market":"us","title":"盘后分析","summary":"…","jobId":"…"}' | de
 ## Local demo (no kernel) / 本地演示（无需内核）
 
 A mock kernel ships in `mock/debrief.js`; point `cliPath` at it to exercise
-every tool, card, and the dashboard page. 仓库自带 `mock/debrief.js` 模拟内核，把 `cliPath` 指向它即可体验全部工具、卡片与仪表盘页面。
+every tool, card, and the Portfolio page. 仓库自带 `mock/debrief.js` 模拟内核，把 `cliPath` 指向它即可体验全部工具、卡片与投资组合页面。
 
 ```yaml
 - id: debrief
@@ -113,7 +113,7 @@ typescript / vitest / eslint / prettier 四项。
 - [docs/quickstart.md](docs/quickstart.md) — 快速开始
 - [docs/configuration.md](docs/configuration.md) — 配置项
 - [docs/tools.md](docs/tools.md) — 每个工具的 JSON Schema 与示例
-- [docs/ui.md](docs/ui.md) — 卡片与 Dashboard 页面规格
+- [docs/ui.md](docs/ui.md) — 卡片与投资组合页面（Portfolio）规格
 - [docs/architecture.md](docs/architecture.md) — 架构（引用设计文档）
 - [docs/storage-retention.md](docs/storage-retention.md) — 存储与保留策略
 - [docs/remote-access.md](docs/remote-access.md) — 浏览器远程访问

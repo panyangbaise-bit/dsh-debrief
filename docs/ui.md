@@ -1,4 +1,4 @@
-# UI · 卡片与 Dashboard 页面规格
+# UI · 卡片与投资组合页面（Portfolio）规格
 
 > English follows the Chinese section.
 
@@ -36,11 +36,11 @@
 
 - 颜色只走宿主 theme token（`--dsw-alias-*`，light/dark 自适应）；涨跌色为语义约定例外（CN 红涨绿跌，`light-dark()` 自适应）。
 - 数字千分位、百分比 2 位；表格等宽数字；图表纯 SVG（折线/面积/环形），抽样 ≤365 点。
-- 加载 = 骨架屏；Dashboard 页面图表用 IntersectionObserver 懒加载（160px 预载边距，进入视口后常驻）。
-- 响应式：≥768px 全列；<768px 页面网格单列；表格横向滚动。
+- 加载 = 骨架屏；投资组合页面图表用 IntersectionObserver 懒加载（160px 预载边距，进入视口后常驻）。
+- 响应式：≥768px 页面网格两列（约 0.85fr/1.55fr：成分面板窄、持仓表面板宽，wide 面板跨两列）；<768px 单列；表格横向滚动。
 - 无障碍：卡片头可折叠（role=button / aria-expanded / Enter·Space）；涨跌同时给 +/- 符号（颜色不作唯一信息通道）；SVG 带 aria-label。
 
-## Dashboard 页面结构（自上而下）
+## 投资组合页面结构（自上而下）
 
 1. 标题 + 时间范围 chips（近 30 天 / 90 天 / 200 天 / 近一年），切换重绘两条折线。
 2. KPI 行（4 格，<768px 自动换行）：总资产 / 今日收益 / 总收益 / 年化收益。
@@ -51,7 +51,7 @@
 7. 监察表（头部「+ 添加自选」，v2 占位入口）。
 8. 底部提示：添加入口 v2 走 DSH 确认流。
 
-## v2 编辑能力（Dashboard）
+## v2 编辑能力（投资组合页面）
 
 - **入口**：持仓表/监察表头部「+ 添加持仓」「+ 添加自选」；行内「编辑 / 删除」。
 - **弹窗**：市场 chips（us/cn/hk/crypto，编辑模式固定为行市场）+ 搜索式选标器 +
@@ -85,7 +85,7 @@
 1. **In-conversation tool cards**: keyed `tool.call.toolview` slot (one entry
    per tool name); a hit replaces the generic tool row. 12 keys are registered
    (9 read tools + news + 3 whitelisted writes).
-2. **Dashboard page (v1.5)**: registered in the `main` slot (key
+2. **Portfolio page (v1.5)**: registered in the `main` slot (key
    `debrief-dashboard`) plus a `sidebar.panellist` navigation entry; data comes
    from the authenticated route `/api/debrief/dashboard?range=N` (the Host runs
    `dashboard --json` internally).
@@ -124,13 +124,14 @@
   SVG charts (line/area/donut), sampled to ≤365 points.
 - Loading = skeleton; page charts lazy-load via IntersectionObserver (160px
   pre-load margin, sticky once visible).
-- Responsive: full columns ≥768px; single column below; tables scroll
-  horizontally.
+- Responsive: ≥768px the page grid splits into two columns (≈0.85fr/1.55fr:
+  composition panel narrow, holdings panel wide; wide panels span both); single
+  column below 768px; tables scroll horizontally.
 - A11y: collapsible card headers (role=button, aria-expanded, Enter/Space);
   up/down always carries a +/- sign (color is never the only channel); SVGs
   carry aria-labels.
 
-## Dashboard page layout (top to bottom)
+## Portfolio page layout (top to bottom)
 
 1. Title + range chips (30/90/200 days, 1 year); switching redraws both lines.
 2. KPI row (4 cells): total assets / day return / total return / annualized.
@@ -141,7 +142,7 @@
 7. Watchlist table (header “+ Add watch”, v2 placeholder).
 8. Footer note: add entries arrive in v2 through the DSH confirmation flow.
 
-## v2 editing (Dashboard)
+## v2 editing (Portfolio page)
 
 - **Entry points**: “+ Add holding” / “+ Add watch” headers and per-row
   Edit / Remove buttons.

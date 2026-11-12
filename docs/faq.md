@@ -33,7 +33,7 @@ Web Host 只服务导出的 `./client` URL；内部 import 会 404。因此浏�
 失败不静默：job 台账写错误码 + 任务会话内播报；`new_once` 串行交付，
 错过时段只补最新一次；重跑 `debrief-setup` 幂等。
 
-## 为什么 Dashboard 路由不走 webServer.register？
+## 为什么投资组合（Portfolio）路由不走 webServer.register？
 
 inspect 到的现行契约：`webServer.register` 的 resource 不带 Peer、不做认证；
 `ctx.connection.fetch` 是经签名 cookie + Host/Origin fence 准入的认证 exact route。
@@ -94,7 +94,7 @@ Failures are never silent: the job ledger records the error code and the task
 session announces it; `new_once` delivers serially and only the latest missed
 occurrence is delivered; re-running `debrief-setup` is idempotent.
 
-## Why doesn't the dashboard route use webServer.register?
+## Why doesn't the Portfolio route use webServer.register?
 
 The inspected contracts show that `webServer.register` resources carry no Peer
 and no authentication, while `ctx.connection.fetch` is the authenticated exact
