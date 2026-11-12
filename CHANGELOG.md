@@ -29,6 +29,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DEBRIEF_BOOTSTRAP_INCOMPLETE` with a dataDir-cleanup hint.
 - `ensureKernel` runs before every `runCli` call (zero overhead once ready);
   `external` mode is the unchanged passthrough for server deployments.
+- Managed mode injects `DATABASE_URL=sqlite:///<dataDir>/portfolio.db` into
+  every kernel subprocess unless the user configured one (external mode passes
+  the environment through untouched); `/debrief-setup` reports the db path.
 - `/debrief-setup` reports kernel status (mode/launcher/data dir/wheel) and
   bootstraps first in managed mode; failures carry Chinese repair steps
   (`DEBRIEF_NO_PYTHON` / `DEBRIEF_NO_WHEEL` / `DEBRIEF_BOOTSTRAP` /

@@ -37,6 +37,23 @@ describe.skipIf(!uvAvailable || wheel === undefined)('integration: real offline 
       const parsed = JSON.parse(worker.stdout) as { ok?: boolean; error?: { code?: string; message?: string } }
       expect(parsed.ok).toBe(false)
       expect(parsed.error?.code).toBeTruthy()
+
+      // From kernel 0.2.2 the CLI honors DATABASE_URL without --db; assert a
+      // real read command works under the URL runCli injects in managed mode.
+      const versionMatch = /portfolio_agent_kernel-(\d+)\.(\d+)\.(\d+)-/.exec(wheel ?? '')
+      const major = Number(versionMatch?.[1] ?? 0)
+      const minor = Number(versionMatch?.[2] ?? 0)
+      const patch = Number(versionMatch?.[3] ?? 0)
+      if (major > 0 || (major === 0 && (minor > 2 || (minor === 2 && patch >= 2)))) {
+        const search = await execQuiet(
+          result.cliPath,
+          ['instruments', 'search', '--market', 'us', '--query', 'aapl', '--json'],
+          { env: { DATABASE_URL: result.dbUrl ?? '' }, timeoutMs: 60000 },
+        )
+        expect(search.code).toBe(0)
+        const searchBody = JSON.parse(search.stdout) as { ok?: boolean; error?: { code?: string } }
+        expect(searchBody, `instruments search failed: ${search.stdout.slice(0, 200)}`).toMatchObject({ ok: true })
+      }
     } finally {
       try {
         rmSync(dir, { recursive: true, force: true })

@@ -18,6 +18,7 @@ import {
   detectBootstrapTool,
   ensureKernel,
   findKernelWheel,
+  resolveKernelEnv,
   resolveKernelMode,
   wheelsDir,
   type EnsureResult,
@@ -132,6 +133,32 @@ describe('kernel mode resolution', () => {
     expect(resolveKernelMode({ kernelMode: 'managed', cliPath: '/x' })).toEqual({ mode: 'managed', cliPath: '' })
     expect(resolveKernelMode({ kernelMode: 'auto', cliPath: '/x' })).toEqual({ mode: 'external', cliPath: '/x' })
     expect(resolveKernelMode({ kernelMode: 'auto' })).toEqual({ mode: 'managed', cliPath: '' })
+  })
+})
+
+describe('kernel subprocess environment', () => {
+  const managed = { mode: 'managed' as const, dbUrl: 'sqlite:////tmp/data/portfolio.db' }
+  const external = { mode: 'external' as const, dbUrl: undefined }
+
+  it('injects DATABASE_URL for managed mode when none is configured', () => {
+    expect(resolveKernelEnv(managed, { PATH: '/usr/bin' })).toEqual({
+      PATH: '/usr/bin',
+      DATABASE_URL: 'sqlite:////tmp/data/portfolio.db',
+    })
+  })
+
+  it('never overrides an explicitly configured DATABASE_URL', () => {
+    expect(resolveKernelEnv(managed, { DATABASE_URL: 'sqlite:////custom/portfolio.db' }).DATABASE_URL).toBe(
+      'sqlite:////custom/portfolio.db',
+    )
+    expect(resolveKernelEnv(managed, { DATABASE_URL: '' }).DATABASE_URL).toBe('sqlite:////tmp/data/portfolio.db')
+  })
+
+  it('passes external mode through untouched (server env owns DATABASE_URL)', () => {
+    expect(resolveKernelEnv(external, { PATH: '/usr/bin' })).toEqual({ PATH: '/usr/bin' })
+    expect(resolveKernelEnv(external, { DATABASE_URL: 'sqlite:////server/db' })).toEqual({
+      DATABASE_URL: 'sqlite:////server/db',
+    })
   })
 })
 

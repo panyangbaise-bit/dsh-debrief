@@ -58,7 +58,24 @@ export function findKernelWheel(dir) {
     return wheels[wheels.length - 1];
 }
 export function runtimeDataDir(config, env) {
-    return config.dataDir ?? env.DEBRIEF_DATA_DIR ?? join(homedir(), '.dsh', 'debrief-runtime');
+    const dir = config.dataDir ?? env.DEBRIEF_DATA_DIR ?? join(homedir(), '.dsh', 'debrief-runtime');
+    return dir.startsWith('~/') ? join(homedir(), dir.slice(2)) : dir;
+}
+/** The sqlite URL managed mode injects when the user has no DATABASE_URL. */
+export function managedDbUrl(dataDir) {
+    return `sqlite:///${join(dataDir, 'portfolio.db')}`;
+}
+/**
+ * Subprocess environment for one kernel call: managed mode injects
+ * `DATABASE_URL=sqlite:///<dataDir>/portfolio.db` unless the user already
+ * configured one; external mode passes the environment through untouched.
+ */
+export function resolveKernelEnv(kernel, env) {
+    if (kernel.mode !== 'managed' || kernel.dbUrl === undefined)
+        return { ...env };
+    if (env.DATABASE_URL !== undefined && env.DATABASE_URL !== '')
+        return { ...env };
+    return { ...env, DATABASE_URL: kernel.dbUrl };
 }
 const venvBin = (dataDir) => join(dataDir, 'venv', process.platform === 'win32' ? 'Scripts' : 'bin');
 const markerPath = (dataDir) => join(dataDir, 'kernel.json');
@@ -224,6 +241,7 @@ async function bootstrapManaged(config, dataDir, env, exec, wheelDir) {
                 cliPath: marker.cliPath,
                 prefixArgs: marker.prefixArgs,
                 dataDir,
+                dbUrl: managedDbUrl(dataDir),
                 wheel,
             };
         }
@@ -363,7 +381,7 @@ async function bootstrapManaged(config, dataDir, env, exec, wheelDir) {
         catch {
             /* marker is an optimization; a missing marker only re-runs bootstrap */
         }
-        return { ready: true, mode: 'managed', cliPath, prefixArgs, dataDir, wheel };
+        return { ready: true, mode: 'managed', cliPath, prefixArgs, dataDir, dbUrl: managedDbUrl(dataDir), wheel };
     }
     finally {
         lock.release();

@@ -83,7 +83,27 @@ export function findKernelWheel(dir: string): string | undefined {
 }
 
 export function runtimeDataDir(config: KernelConfigLike, env: Record<string, string | undefined>): string {
-  return config.dataDir ?? env.DEBRIEF_DATA_DIR ?? join(homedir(), '.dsh', 'debrief-runtime')
+  const dir = config.dataDir ?? env.DEBRIEF_DATA_DIR ?? join(homedir(), '.dsh', 'debrief-runtime')
+  return dir.startsWith('~/') ? join(homedir(), dir.slice(2)) : dir
+}
+
+/** The sqlite URL managed mode injects when the user has no DATABASE_URL. */
+export function managedDbUrl(dataDir: string): string {
+  return `sqlite:///${join(dataDir, 'portfolio.db')}`
+}
+
+/**
+ * Subprocess environment for one kernel call: managed mode injects
+ * `DATABASE_URL=sqlite:///<dataDir>/portfolio.db` unless the user already
+ * configured one; external mode passes the environment through untouched.
+ */
+export function resolveKernelEnv(
+  kernel: Pick<EnsureResult, 'mode' | 'dbUrl'>,
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  if (kernel.mode !== 'managed' || kernel.dbUrl === undefined) return { ...env }
+  if (env.DATABASE_URL !== undefined && env.DATABASE_URL !== '') return { ...env }
+  return { ...env, DATABASE_URL: kernel.dbUrl }
 }
 
 const venvBin = (dataDir: string): string => join(dataDir, 'venv', process.platform === 'win32' ? 'Scripts' : 'bin')
@@ -248,6 +268,7 @@ export interface EnsureResult {
   cliPath: string
   prefixArgs: readonly string[]
   dataDir?: string
+  dbUrl?: string
   wheel?: string
   errorCode?: string
   error?: string
@@ -304,6 +325,7 @@ async function bootstrapManaged(
         cliPath: marker.cliPath,
         prefixArgs: marker.prefixArgs,
         dataDir,
+        dbUrl: managedDbUrl(dataDir),
         wheel,
       }
     }
@@ -464,7 +486,7 @@ async function bootstrapManaged(
     } catch {
       /* marker is an optimization; a missing marker only re-runs bootstrap */
     }
-    return { ready: true, mode: 'managed', cliPath, prefixArgs, dataDir, wheel }
+    return { ready: true, mode: 'managed', cliPath, prefixArgs, dataDir, dbUrl: managedDbUrl(dataDir), wheel }
   } finally {
     lock.release()
   }

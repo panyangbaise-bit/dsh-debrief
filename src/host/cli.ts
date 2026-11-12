@@ -7,7 +7,7 @@
  * canonical envelope, so a failed call is a structured value, never a throw.
  */
 import { spawn } from 'node:child_process'
-import { ensureKernel } from './kernel.js'
+import { ensureKernel, resolveKernelEnv, type EnsureResult } from './kernel.js'
 import type { DebriefConfig } from './config.js'
 
 export interface EnvelopeOk {
@@ -74,13 +74,12 @@ export function runCli(
         error: { code: kernel.errorCode ?? 'DEBRIEF_BOOTSTRAP', message: kernel.error ?? 'kernel is not ready' },
       } satisfies Envelope
     }
-    return runCliResolved(kernel.cliPath, kernel.prefixArgs, config, args, options)
+    return runCliResolved(kernel, config, args, options)
   })
 }
 
 function runCliResolved(
-  cliPath: string,
-  prefixArgs: readonly string[],
+  kernel: EnsureResult,
   config: DebriefConfig,
   args: readonly string[],
   options: { signal?: AbortSignal; stdin?: string },
@@ -92,8 +91,8 @@ function runCliResolved(
     }
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(cliPath, [...prefixArgs, ...args, '--json'], {
-        env: { ...process.env },
+      child = spawn(kernel.cliPath, [...kernel.prefixArgs, ...args, '--json'], {
+        env: resolveKernelEnv(kernel, process.env),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } catch (error) {
@@ -153,7 +152,7 @@ function runCliResolved(
           message: timedOut
             ? `kernel timed out after ${config.timeoutMs}ms`
             : error.code === 'ENOENT'
-              ? `kernel CLI not found at ${JSON.stringify(cliPath)}`
+              ? `kernel CLI not found at ${JSON.stringify(kernel.cliPath)}`
               : error.message,
         },
       })

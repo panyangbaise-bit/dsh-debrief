@@ -137,8 +137,10 @@ export function registerSetupCommand(
             for (const item of outcome.failed) lines.push(`  · ${item.title} — ${item.message}`)
           }
           lines.push(`内核状态：mode=${kernel.mode} · 就绪 · CLI ${kernel.cliPath}`)
-          if (kernel.dataDir !== undefined)
+          if (kernel.dataDir !== undefined) {
             lines.push(`运行目录：${kernel.dataDir}（内核轮子：${kernel.wheel ?? '—'}）`)
+            if (kernel.dbUrl !== undefined) lines.push(`数据库：${kernel.dbUrl}（未显式配置 DATABASE_URL 时自动注入）`)
+          }
           lines.push('任务可在 Schedule 页面查看、暂停或删除。')
           return { kind: 'success', text: lines.join('\n') }
         } catch (error) {
