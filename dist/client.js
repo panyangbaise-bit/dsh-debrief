@@ -326,7 +326,11 @@ function validate(shape, value, path = '$') {
                 return { ok: false, path, reason: `expected object, got ${Array.isArray(value) ? 'array' : typeof value}` };
             }
             const record = value;
-            const out = {};
+            // Render-model gate: validate the declared fields but NEVER drop undeclared
+            // keys — an incomplete schema must not erase kernel payload fields (a
+            // whitelist here once blanked every dashboard table cell). The Host copy
+            // of this validator stays strict because write payloads are exact.
+            const out = { ...record };
             for (const [key, member] of Object.entries(shape.properties)) {
                 const result = validate(member, record[key], `${path}.${key}`);
                 if (!result.ok)
@@ -384,6 +388,28 @@ function envelopeOf(block) {
     }
 }
 /** Loose render-model gate: unknown schema versions or malformed payloads degrade, never crash. */
+/** Shared row shapes: complete field sets matching the kernel/mock payloads. */
+const POSITION_ROW = {
+    market: opt(s()),
+    symbol: opt(s()),
+    name: opt(s()),
+    quantity: opt(num()),
+    cost: opt(num()),
+    price: opt(num()),
+    marketValue: opt(num()),
+    pnlPct: opt(num()),
+    weight: opt(num()),
+};
+const WATCH_ROW = {
+    market: opt(s()),
+    symbol: opt(s()),
+    name: opt(s()),
+    price: opt(num()),
+    changePct: opt(num()),
+    targetPrice: opt(num()),
+    distancePct: opt(num()),
+    alert: opt({ type: 'boolean' }),
+};
 function renderModel(kind, data) {
     if (!data || typeof data !== 'object')
         return { ok: false, reason: 'tool result is not an object' };
@@ -391,13 +417,14 @@ function renderModel(kind, data) {
     switch (kind) {
         case 'debrief_holdings': {
             const result = validate(obj({
+                asOf: opt(s()),
+                currency: opt(s()),
                 totalMarketValue: opt(num()),
                 dayPnl: opt(num()),
                 dayPnlPct: opt(num()),
                 totalPnl: opt(num()),
                 totalPnlPct: opt(num()),
-                asOf: opt(s()),
-                positions: opt(arr(obj({ symbol: opt(s()), name: opt(s()), market: opt(s()) }))),
+                positions: opt(arr(obj(POSITION_ROW))),
             }), data);
             return result.ok
                 ? { ok: true, model: result.value }
@@ -407,6 +434,7 @@ function renderModel(kind, data) {
             const result = validate(obj({
                 kpis: opt(obj({
                     totalAssets: opt(num()),
+                    currency: opt(s()),
                     dayPnl: opt(num()),
                     dayPnlPct: opt(num()),
                     totalPnl: opt(num()),
@@ -415,14 +443,15 @@ function renderModel(kind, data) {
                 })),
                 series: opt(obj({ range: opt(int()), equity: opt(arr(num())), returns: opt(arr(num())) })),
                 composition: opt(arr(obj({ name: opt(s()), value: opt(num()) }))),
-                holdings: opt(arr(obj({ symbol: opt(s()), name: opt(s()), market: opt(s()) }))),
-                watchlist: opt(arr(obj({ symbol: opt(s()), name: opt(s()), market: opt(s()) }))),
+                holdings: opt(arr(obj(POSITION_ROW))),
+                watchlist: opt(arr(obj(WATCH_ROW))),
             }), data);
             return result.ok
                 ? { ok: true, model: result.value }
                 : { ok: false, reason: `${result.path} ${result.reason}` };
         }
         default:
+            // Unknown or write-result kinds pass through unchanged (lossless).
             return { ok: true, model: record };
     }
 }

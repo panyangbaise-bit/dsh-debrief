@@ -158,6 +158,152 @@ describe('render models (card fallback path)', () => {
   })
 })
 
+describe('render models lose no fields (regression: blank dashboard tables)', () => {
+  const fullPosition = {
+    market: 'CN',
+    symbol: '600519',
+    name: '贵州茅台',
+    quantity: 200,
+    cost: 1450.0,
+    price: 1412.0,
+    marketValue: 282400,
+    pnlPct: -2.62,
+    weight: 21,
+  }
+  const fullWatchRow = {
+    market: 'US',
+    symbol: 'NVDA',
+    name: '英伟达',
+    price: 118.2,
+    changePct: 1.8,
+    targetPrice: 105.0,
+    distancePct: 12.6,
+    alert: true,
+  }
+
+  it('debrief_holdings output deep-equals input', () => {
+    const payload = {
+      asOf: '2026-11-10 09:30',
+      currency: 'CNY',
+      totalMarketValue: 1234567,
+      dayPnl: 15120,
+      dayPnlPct: 1.24,
+      totalPnl: 95860,
+      totalPnlPct: 8.42,
+      positions: [fullPosition],
+    }
+    const result = renderModel('debrief_holdings', payload)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.model).toEqual(payload)
+  })
+
+  it('debrief_dashboard output deep-equals input (holdings/watchlist rows keep every cell field)', () => {
+    const payload = {
+      kpis: {
+        totalAssets: 1234567,
+        currency: 'CNY',
+        dayPnl: 15120,
+        dayPnlPct: 1.24,
+        totalPnl: 95860,
+        totalPnlPct: 8.42,
+        annualPct: 12.6,
+      },
+      series: { range: 90, equity: [1000000, 1002867.93, 1234567], returns: [0, 0.16, 8.42] },
+      composition: [
+        { name: '贵州茅台', value: 21 },
+        { name: '其他', value: 25 },
+      ],
+      holdings: [fullPosition],
+      watchlist: [fullWatchRow],
+    }
+    const result = renderModel('debrief_dashboard', payload)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.model).toEqual(payload)
+  })
+
+  it('passthrough kinds (transactions/watchlist/report/memory/analyze/jobs/news/writes) stay lossless', () => {
+    const payloads: Record<string, unknown> = {
+      debrief_transactions: {
+        total: 48,
+        limit: 20,
+        offset: 0,
+        items: [
+          {
+            time: '2026-11-08 09:32',
+            side: 'buy',
+            market: 'US',
+            symbol: 'AAPL',
+            name: '苹果',
+            quantity: 50,
+            price: 182.4,
+            amount: 9120,
+            status: 'filled',
+          },
+        ],
+      },
+      debrief_watchlist: { count: 12, items: [fullWatchRow] },
+      debrief_report: {
+        id: 'rpt-1',
+        market: 'US',
+        title: '盘后分析',
+        generatedAt: '2026-11-09 18:00',
+        summary: '…',
+        fullText: '…',
+        metrics: [{ label: '波动率', value: '18.6%' }],
+        chart: { title: '60 日走势', unit: '', points: [100, 101.2] },
+      },
+      debrief_memory: {
+        query: '建仓理由',
+        items: [
+          {
+            layer: 'long',
+            topic: 't',
+            instruments: ['AAPL'],
+            confidence: 'high',
+            timeRange: '2026-03 ~ 2026-05',
+            summary: '…',
+            evidence: [{ docId: 12, date: '2026-03-18', label: '建仓决策', quote: '…' }],
+          },
+        ],
+      },
+      debrief_analyze: {
+        market: 'us',
+        preparedAt: '2026-11-10 15:30',
+        jobId: 'debrief-job-2048',
+        guidance: '…',
+        inputs: {
+          quotes: [{ symbol: 'NVDA', name: '英伟达', price: 118.2, changePct: 1.8 }],
+          news: [{ title: '…', at: '…', source: '…' }],
+          memoryCandidates: [{ topic: 't', summary: 's' }],
+        },
+      },
+      debrief_jobs: {
+        items: [
+          {
+            id: 'debrief-job-2043',
+            kind: '盘后分析 · 美股',
+            at: '2026-11-09 18:00',
+            status: 'succeeded',
+            durationSec: 42,
+          },
+        ],
+      },
+      debrief_news: {
+        fetchedAt: '2026-11-11 15:00',
+        items: [{ title: '…', at: '2026-11-11 14:20', source: '财联社', market: 'CN' }],
+      },
+      debrief_report_create: { id: 'rpt-1', status: 'created' },
+      debrief_memory_compact_write: { id: 'ltm-1', version: 1 },
+      debrief_memory_add: { docId: 3001 },
+    }
+    for (const [kind, payload] of Object.entries(payloads)) {
+      const result = renderModel(kind, payload)
+      expect(result.ok, `${kind} must pass`).toBe(true)
+      if (result.ok) expect(result.model, `${kind} must not lose fields`).toEqual(payload)
+    }
+  })
+})
+
 describe('client schema validator parity', () => {
   const shape = obj(
     {
