@@ -363,9 +363,21 @@ async function bootstrapManaged(
       const venv = await exec('uv', ['venv', '--python', '3.11', join(dataDir, 'venv')], { env, timeoutMs: 180000 })
       if (venv.code !== 0) installError = venv.error ?? venv.stderr
       if (installError === undefined) {
+        // --no-cache: uv/pip caches key by filename+version, so a
+        // same-version wheel override would otherwise hit a stale cache.
         const install = await exec(
           'uv',
-          ['pip', 'install', '--python', venvPython, '--no-index', '--find-links', wheelDir, KERNEL_PACKAGE],
+          [
+            'pip',
+            'install',
+            '--no-cache',
+            '--python',
+            venvPython,
+            '--no-index',
+            '--find-links',
+            wheelDir,
+            KERNEL_PACKAGE,
+          ],
           { env, timeoutMs: 180000 },
         )
         if (install.code !== 0) installError = install.error ?? install.stderr
@@ -376,7 +388,7 @@ async function bootstrapManaged(
       if (installError === undefined) {
         const install = await exec(
           venvPython,
-          ['-m', 'pip', 'install', '--no-index', '--find-links', wheelDir, KERNEL_PACKAGE],
+          ['-m', 'pip', 'install', '--no-cache-dir', '--no-index', '--find-links', wheelDir, KERNEL_PACKAGE],
           {
             env,
             timeoutMs: 180000,
@@ -396,6 +408,22 @@ async function bootstrapManaged(
         wheel,
         errorCode: 'DEBRIEF_BOOTSTRAP',
         error: `内核自举失败：${installError.slice(0, 400)}。可运行 /debrief-setup 查看状态，或删除 ${dataDir} 后重试。`,
+      }
+    }
+
+    // Content self-check: the installed package must expose both the CLI
+    // modules and the adapters module — guards against stale cached wheels.
+    const selfCheck = await exec(venvPython, ['-c', 'import adapters, debrief'], { env, timeoutMs: 60000 })
+    if (selfCheck.code !== 0) {
+      return {
+        ready: false,
+        mode: 'managed',
+        cliPath: venvDebrief,
+        prefixArgs: [],
+        dataDir,
+        wheel,
+        errorCode: 'DEBRIEF_BOOTSTRAP_INCOMPLETE',
+        error: `内核自举不完整：安装内容缺少 adapters/debrief 模块（可能命中了旧缓存）。请删除 ${dataDir} 后重试，或运行 /debrief-setup 查看状态。${selfCheck.stderr.slice(0, 200)}`,
       }
     }
 

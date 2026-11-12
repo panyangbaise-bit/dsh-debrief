@@ -22,6 +22,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the wheel fingerprint and a mismatch rebuilds; a directory lock serializes
   concurrent bootstraps (`DEBRIEF_KERNEL_INITIALIZING` on timeout). Bootstrap
   output is captured separately and never pollutes the CLI envelope.
+- Install bypasses the uv/pip cache (`--no-cache` / `--no-cache-dir`) —
+  caches key by filename+version, so a same-version wheel override would
+  otherwise hit a stale cached package — followed by a content self-check
+  (`import adapters, debrief`) that fails bootstraps as
+  `DEBRIEF_BOOTSTRAP_INCOMPLETE` with a dataDir-cleanup hint.
 - `ensureKernel` runs before every `runCli` call (zero overhead once ready);
   `external` mode is the unchanged passthrough for server deployments.
 - `/debrief-setup` reports kernel status (mode/launcher/data dir/wheel) and

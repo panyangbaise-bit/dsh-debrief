@@ -190,6 +190,12 @@ describe('managed bootstrap (mocked uv, offline)', () => {
         mkdirSync(join(venv, 'bin'), { recursive: true })
         writeFileSync(join(venv, 'bin', 'debrief'), '#!/bin/sh\necho ok\n')
         chmodSync(join(venv, 'bin', 'debrief'), 0o755)
+        writeFileSync(join(venv, 'bin', 'python'), '#!/bin/sh\necho ok\n')
+        chmodSync(join(venv, 'bin', 'python'), 0o755)
+      }
+      // venv python self-check (import adapters, debrief)
+      if (command.endsWith(join('bin', 'python')) && args[0] === '-c') {
+        return { ok: true, code: 0, stdout: '', stderr: '' }
       }
       return { ok: true, code: 0, stdout: '', stderr: '' }
     }
@@ -211,6 +217,35 @@ describe('managed bootstrap (mocked uv, offline)', () => {
     const second = await ensureKernel(config, env, fakeExec as never, wheelDir)
     expect(second.ready).toBe(true)
     expect(records.length).toBe(callsBefore) // fast path: no new bootstrap calls
+
+    // Install bypassed the cache and the content self-check ran.
+    expect(records.some((record) => record.includes('--no-cache'))).toBe(true)
+    expect(records.some((record) => record.includes('import adapters, debrief'))).toBe(true)
+  })
+
+  it('reports DEBRIEF_BOOTSTRAP_INCOMPLETE when the content self-check fails', async () => {
+    const { env } = fakeEnvironment()
+    const fakeExec = async (command: string, args: readonly string[]): Promise<FakeResult> => {
+      if (command === 'uv' && args[0] === 'venv') {
+        const venv = String(args[3])
+        mkdirSync(join(venv, 'bin'), { recursive: true })
+        writeFileSync(join(venv, 'bin', 'debrief'), '#!/bin/sh\necho ok\n')
+        chmodSync(join(venv, 'bin', 'debrief'), 0o755)
+        writeFileSync(join(venv, 'bin', 'python'), '#!/bin/sh\necho ok\n')
+        chmodSync(join(venv, 'bin', 'python'), 0o755)
+        return { ok: true, code: 0, stdout: '', stderr: '' }
+      }
+      if (command.endsWith(join('bin', 'python')) && args[0] === '-c') {
+        return { ok: true, code: 1, stdout: '', stderr: 'ModuleNotFoundError: No module named adapters' }
+      }
+      return { ok: true, code: 0, stdout: '', stderr: '' }
+    }
+    const wheelDir = fakeWheelsDir(['portfolio_agent_kernel-0.2.0-py3-none-any.whl'])
+    const config = rawConfig({ kernelMode: 'managed', dataDir: env.DEBRIEF_DATA_DIR })
+    const result = await ensureKernel(config, env, fakeExec as never, wheelDir)
+    expect(result.ready).toBe(false)
+    expect(result.errorCode).toBe('DEBRIEF_BOOTSTRAP_INCOMPLETE')
+    expect(result.error).toContain('adapters')
   })
 
   it('rebuilds when the bundled wheel fingerprint changes', async () => {
@@ -223,6 +258,12 @@ describe('managed bootstrap (mocked uv, offline)', () => {
         mkdirSync(join(venv, 'bin'), { recursive: true })
         writeFileSync(join(venv, 'bin', 'debrief'), '#!/bin/sh\necho ok\n')
         chmodSync(join(venv, 'bin', 'debrief'), 0o755)
+        writeFileSync(join(venv, 'bin', 'python'), '#!/bin/sh\necho ok\n')
+        chmodSync(join(venv, 'bin', 'python'), 0o755)
+      }
+      // venv python self-check (import adapters, debrief)
+      if (command.endsWith(join('bin', 'python')) && args[0] === '-c') {
+        return { ok: true, code: 0, stdout: '', stderr: '' }
       }
       return { ok: true, code: 0, stdout: '', stderr: '' }
     }
@@ -337,12 +378,13 @@ describe('runCli kernel prefix (managed path)', () => {
 })
 
 describe('bundled wheels audit', () => {
-  it('bundled dir ships the slim kernel wheel plus the offline dependency closure', () => {
-    // The real bundled dir must contain the kernel wheel and the 8 dependency
-    // wheels the lead verified as the exact offline closure.
+  it('bundled dir ships exactly one slim kernel wheel plus the offline dependency closure', () => {
+    // The real bundled dir must contain exactly one kernel wheel and the 8
+    // dependency wheels the lead verified as the exact offline closure.
     const dir = wheelsDir()
     const entries = existsSync(dir) ? readdirSync(dir) : []
-    expect(entries).toContain('portfolio_agent_kernel-0.2.0-py3-none-any.whl')
+    const kernelWheels = entries.filter((name) => name.startsWith('portfolio_agent_kernel-') && name.endsWith('.whl'))
+    expect(kernelWheels.length).toBe(1)
     for (const name of [
       'sqlalchemy-2.1.8-py3-none-any.whl',
       'requests-2.34.2-py3-none-any.whl',

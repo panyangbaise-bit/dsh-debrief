@@ -24,6 +24,12 @@ describe.skipIf(!uvAvailable || wheel === undefined)('integration: real offline 
       const help = await execQuiet(result.cliPath, ['--help'], { timeoutMs: 30000 })
       expect(help.code).toBe(0)
 
+      // Content self-check: the fixed wheel must ship the adapters module
+      // (guards the --no-cache install against stale same-version caches).
+      const venvPython = join(env.DEBRIEF_DATA_DIR as string, 'venv', 'bin', 'python')
+      const content = await execQuiet(venvPython, ['-c', 'import adapters, debrief'], { timeoutMs: 30000 })
+      expect(content.code, `import adapters, debrief failed: ${content.stderr}`).toBe(0)
+
       // worker --dry-run must degrade to a structured envelope error for the
       // missing collectors extra — never an ImportError traceback.
       const worker = await execQuiet(result.cliPath, ['worker', '--dry-run', '--json'], { timeoutMs: 30000 })
