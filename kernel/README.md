@@ -1,7 +1,7 @@
 # debrief 数据内核（随插件内置）
 
 本目录是 `dsh-debrief` 自带的数据内核（Python，无模型、无 Agent），也是 npm 包
-`kernel/wheels/` 里 slim wheel 的源码出处。插件通过本地子进程调用内核：
+`kernel/wheels/` 里内核 wheel 的源码出处。插件通过本地子进程调用内核：
 
 ```text
 dsh-debrief (Host) ──subprocess: debrief <command> --json──> kernel (SQLite)
@@ -19,10 +19,10 @@ dsh-debrief (Host) ──subprocess: debrief <command> --json──> kernel (SQL
 | 路径          | 内容                                                                                                                        |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `src/`        | 内核源码（`debrief/` CLI 与业务、`db/`、`common/`、`domain/`、`memory/`、`adapters/`、`scheduler/`、`notifier/`、`tests/`） |
-| `wheels/`     | 随 npm 包分发的离线轮子：slim 内核 wheel + 8 个纯 Python 依赖                                                               |
+| `wheels/`     | 随 npm 包分发的离线轮子：内核 wheel（纯 Python）+ 8 个依赖轮子                                                              |
 | `docs/cli.md` | CLI 契约：每个命令的 JSON envelope、错误码、设计决策记录                                                                    |
 
-## 重建 slim wheel
+## 重建内核 wheel
 
 内容一变**必须升版本号**（uv/pip 缓存以「文件名+版本」为键，禁止同版本覆盖）。
 
@@ -36,15 +36,16 @@ cp dist/*.whl ../wheels/      # 旧版本轮子请删除，只保留当前版本
 内核版本与 `src/pyproject.toml`、`src/debrief/__init__.py`、wheel METADATA 三处保持
 一致；`kernel/wheels/` 必须恰好包含一个内核轮子（仓库测试会校验）。
 
-## 完整内核（含行情/新闻采集）
+## 完整内核（含行情采集 worker）
 
-slim wheel 只含 CLI 需要的模块与 core 依赖（sqlalchemy / requests /
-python-dotenv）。行情、新闻、目录同步等采集能力需要额外依赖（akshare、yfinance、
-apscheduler 等，`[collectors]` extra）与源码安装：
+内核 wheel 含全部纯 Python 模块与 core 依赖（sqlalchemy / requests /
+python-dotenv）：CLI 读写、实时新闻、汇率、Telegram notify 在只装 wheel 的
+managed venv 中即可运行。行情实时刷新与采集 worker 需要额外依赖（akshare、
+yfinance、apscheduler 等，`[collectors]` extra）：
 
 ```sh
 uv pip install "portfolio-agent-kernel[collectors] @ file:./src"
-debrief worker            # APScheduler 数据采集 + 记忆维护（无模型调用）
+debrief worker            # APScheduler 数据采集 + 提醒比对（无模型调用）
 ```
 
 详细命令契约见 [docs/cli.md](docs/cli.md)。

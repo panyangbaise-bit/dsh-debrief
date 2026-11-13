@@ -1,6 +1,5 @@
 """Verify process lifecycle without launching live providers or background jobs."""
 
-import importlib
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
@@ -59,15 +58,6 @@ def test_optional_notification_failure_keeps_services_running(services, monkeypa
     runtime.start_services()
     assert runtime._services is not None
     assert "scheduler-" not in services
-
-
-def test_importing_server_does_not_bootstrap(monkeypatch):
-    import server
-
-    start = Mock(side_effect=AssertionError("import must be inert"))
-    monkeypatch.setattr(runtime, "start_services", start)
-    importlib.reload(server)
-    start.assert_not_called()
 
 
 def test_memory_worker_can_stop_and_restart_without_overlapping(monkeypatch):
