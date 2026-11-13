@@ -1,0 +1,767 @@
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor as _PoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+import akshare as ak
+import pandas as pd
+
+from adapters.base import MarketAdapter
+from adapters.call_timeout import run_with_timeout, run_with_timeout_or_flag
+from adapters.cn_index_map import resolve_csi_index_code
+from adapters.safe import error_payload
+from domain.instruments import resolve_cn_symbol
+
+# get_fund_info budgets — stay well under TOOL_CALL_TIMEOUT (120s).
+_FUND_OVERVIEW_TIMEOUT = 15.0
+_FUND_PART_TIMEOUT = 12.0
+_FUND_ENRICH_WALL_TIMEOUT = 25.0
+
+# stock_zh_a_spot_em downloads the full A-share board — reuse across parallel
+# get_price calls within a short window (agent batch / fund constituents).
+_SPOT_TTL_SECONDS = 60.0
+_spot_lock = threading.Lock()
+_spot_df: Optional[pd.DataFrame] = None
+_spot_fetched_at: float = 0.0
+
+
+def _get_a_share_spot_df() -> pd.DataFrame:
+    """Thread-safe TTL cache for East Money A-share spot table.
+
+    A failed refresh reuses the last successful board (stale) so a transient
+    RemoteDisconnected from ``stock_zh_a_spot_em`` does not crash the job.
+    """
+    global _spot_df, _spot_fetched_at
+    now = time.monotonic()
+    cached = _spot_df
+    if cached is not None and (now - _spot_fetched_at) < _SPOT_TTL_SECONDS:
+        return cached
+    with _spot_lock:
+        now = time.monotonic()
+        if _spot_df is not None and (now - _spot_fetched_at) < _SPOT_TTL_SECONDS:
+            return _spot_df
+        try:
+            df = ak.stock_zh_a_spot_em()
+        except Exception:
+            if _spot_df is not None:
+                return _spot_df
+            raise
+        _spot_df = df
+        _spot_fetched_at = time.monotonic()
+        return df
+
+
+class CNMarketAdapter(MarketAdapter):
+    """A-share market data via akshare. Supports stocks and funds/ETFs."""
+
+    MARKET = "CN"
+
+    def get_price(self, ticker: str) -> dict:
+        try:
+            kind, code = resolve_cn_symbol(ticker)
+            if kind == "fund":
+                result = self._get_fund_price(code)
+            elif kind == "stock":
+                result = self._get_stock_price(code)
+            else:
+                rows = self._get_exchange_kline(code, "1mo", kind)
+                if not rows:
+                    raise ValueError(f"No {kind} data for {code}")
+                last = rows[-1]
+                result = {
+                    "price": last["close"],
+                    "currency": "CNY",
+                    "timestamp": last["date"],
+                    "observed_at": last["date"],
+                    "quote_type": "daily_close",
+                    "volume": last.get("volume"),
+                    "change_pct": round((last["close"] / rows[-2]["close"] - 1) * 100, 2)
+                    if len(rows) > 1 and rows[-2]["close"]
+                    else None,
+                }
+            return {**result, "ticker": ticker, "resolved_code": code, "asset_type": kind}
+        except Exception as exc:
+            return error_payload(exc, ticker=ticker)
+
+    @staticmethod
+    def _safe_price(ticker: str, fn) -> dict:
+        try:
+            return fn(ticker)
+        except Exception as exc:
+            return {
+                "ticker": ticker,
+                "error": type(exc).__name__,
+                "message": str(exc) or type(exc).__name__,
+            }
+
+    def _get_stock_price(self, ticker: str) -> dict:
+        df = _get_a_share_spot_df()
+        row = df[df["代码"] == ticker]
+        if row.empty:
+            raise ValueError(f"Ticker {ticker} not found in stock list")
+        r = row.iloc[0]
+        return {
+            "ticker": ticker,
+            "price": float(r["最新价"]),
+            "currency": "CNY",
+            "change_pct": float(r["涨跌幅"]),
+            "volume": float(r["成交量"]) if "成交量" in r else None,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _get_fund_price(self, ticker: str) -> dict:
+        """Return OTC fund/ETF-feeder NAV (T+1 published), not live exchange ticks.
+
+        ``change_pct`` is NAV day-over-day vs the previous 净值日 — never treat
+        it as same-session intraday move. ``nav_date`` is the authoritative as-of.
+        """
+        df = ak.fund_open_fund_info_em(symbol=ticker, indicator="单位净值走势")
+        if df.empty:
+            raise ValueError(f"Fund {ticker} not found")
+        latest = df.iloc[-1]
+        prev = df.iloc[-2] if len(df) >= 2 else latest
+        change_pct = 0.0
+        if latest["单位净值"] and prev["单位净值"]:
+            change_pct = round((float(latest["单位净值"]) / float(prev["单位净值"]) - 1) * 100, 2)
+        nav_date = str(latest.get("净值日期", ""))[:10] or None
+        prev_nav_date = str(prev.get("净值日期", ""))[:10] or None
+        return {
+            "ticker": ticker,
+            "price": float(latest["单位净值"]),
+            "currency": "CNY",
+            "change_pct": change_pct,
+            "volume": None,
+            # As-of NAV day (T+1 publish lag) — not wall-clock "live quote" time.
+            "timestamp": nav_date or datetime.now().isoformat(),
+            "nav_date": nav_date,
+            "prev_nav_date": prev_nav_date,
+            "quote_type": "nav",
+            "lag": "T+1",
+            "change_pct_basis": "nav_dod",
+            "note": (
+                "场外基金/ETF联接单位净值，通常 T+1 公布；"
+                "change_pct 为相对上一净值日，不是今日盘中涨跌。"
+            ),
+            "fetched_at": datetime.now().isoformat(),
+        }
+
+    def get_kline(self, ticker: str, period: str = "3mo") -> list[dict] | dict:
+        try:
+            kind, code = resolve_cn_symbol(ticker)
+            if kind == "fund":
+                rows = self._get_fund_kline(code, period)
+            elif kind == "stock":
+                rows = self._get_stock_kline(code, period)
+            else:
+                rows = self._get_exchange_kline(code, period, kind)
+            return [{**row, "asset_type": kind, "resolved_code": code} for row in rows]
+        except Exception as exc:
+            return error_payload(exc, ticker=ticker)
+
+    def _get_exchange_kline(self, ticker: str, period: str, kind: str) -> list[dict]:
+        days = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "5y": 1825}.get(period, 90)
+        end = datetime.now(ZoneInfo("Asia/Shanghai"))
+        params = dict(
+            symbol=ticker,
+            period="daily",
+            start_date=(end - timedelta(days=days)).strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+        )
+        df = (
+            ak.index_zh_a_hist(**params)
+            if kind == "index"
+            else ak.fund_etf_hist_em(**params, adjust="qfq")
+        )
+        return [
+            {
+                "date": str(r["日期"])[:10],
+                "open": float(r["开盘"]),
+                "high": float(r["最高"]),
+                "low": float(r["最低"]),
+                "close": float(r["收盘"]),
+                "volume": float(r["成交量"]),
+                "volume_unit": "lot",
+                "series_kind": "ohlc",
+            }
+            for _, r in df.iterrows()
+        ]
+
+    def _get_stock_kline(self, ticker: str, period: str = "3mo") -> list[dict]:
+        days = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "5y": 1825}.get(period, 90)
+        end = datetime.now(ZoneInfo("Asia/Shanghai"))
+        df = ak.stock_zh_a_hist(
+            symbol=ticker,
+            period="daily",
+            adjust="qfq",
+            start_date=(end - timedelta(days=days)).strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+        )
+        if df.empty:
+            return []
+        return [
+            {
+                "date": str(row["日期"])[:10],
+                "open": float(row["开盘"]),
+                "high": float(row["最高"]),
+                "low": float(row["最低"]),
+                "close": float(row["收盘"]),
+                "volume": float(row["成交量"]) if "成交量" in row else None,
+                "amount": float(row["成交额"]) if "成交额" in row else None,
+                "turnover_rate": float(row["换手率"]) if "换手率" in row else None,
+                "volume_unit": "lot",
+            }
+            for _, row in df.iterrows()
+        ]
+
+    def _get_fund_kline(self, ticker: str, period: str = "3mo") -> list[dict]:
+        days_map = {"1mo": 22, "3mo": 66, "6mo": 132, "1y": 252, "5y": 1260}
+        limit = days_map.get(period, 66)
+        df = ak.fund_open_fund_info_em(symbol=ticker, indicator="单位净值走势")
+        if df.empty:
+            return []
+        df = df.tail(limit)
+        return [
+            {
+                "date": str(row["净值日期"])[:10],
+                "open": float(row["单位净值"]),
+                "high": float(row["单位净值"]),
+                "low": float(row["单位净值"]),
+                "close": float(row["单位净值"]),
+                "volume": None,
+                "series_kind": "nav",
+            }
+            for _, row in df.iterrows()
+        ]
+
+    def get_financials(self, ticker: str) -> dict:
+        try:
+            kind, code = resolve_cn_symbol(ticker)
+            if kind != "stock":
+                return {
+                    "ticker": ticker,
+                    "asset_type": kind,
+                    "note": "非上市公司，无公司财报。基金请用 get_fund_info，指数需分析成分暴露。",
+                }
+            return {**self._get_stock_financials(code), "ticker": ticker, "asset_type": kind}
+        except Exception as exc:
+            return error_payload(exc, ticker=ticker)
+
+    def get_fund_info(self, ticker: str, top_constituents: int = 20) -> dict:
+        """Fund/ETF overview with optional parallel enrichments (fees/alloc/constituents).
+
+        Overview (East Money) is required. Fees / allocation / constituents are
+        fetched in parallel under short per-call + wall-clock budgets; any miss
+        degrades to empty fields + notes instead of blocking the agent.
+        """
+        try:
+            if ":" in ticker:
+                kind, ticker = resolve_cn_symbol(ticker)
+                if kind not in {"fund", "etf"}:
+                    raise ValueError("get_fund_info only accepts funds/ETFs")
+            return self._get_fund_info_inner(ticker, top_constituents)
+        except Exception as exc:
+            from adapters.safe import error_payload
+
+            return error_payload(exc, ticker=ticker)
+
+    def _get_fund_info_inner(self, ticker: str, top_constituents: int) -> dict:
+        code = (ticker or "").strip()
+        if not code:
+            return {"ticker": ticker, "error": "empty ticker"}
+
+        overview, ov_timeout, ov_error = run_with_timeout_or_flag(
+            self._fetch_fund_overview,
+            _FUND_OVERVIEW_TIMEOUT,
+            code,
+        )
+        if ov_timeout:
+            return {
+                "ticker": code,
+                "error": "timeout",
+                "message": f"fund overview timed out after {_FUND_OVERVIEW_TIMEOUT:.0f}s",
+            }
+        if ov_error is not None:
+            return {
+                "ticker": code,
+                "error": type(ov_error).__name__,
+                "message": str(ov_error) or type(ov_error).__name__,
+            }
+        if not overview or (overview.get("error") and not overview.get("name")):
+            return overview or {"ticker": code, "error": "fund overview not found"}
+
+        name = overview.get("name") or ""
+        tracked = overview.get("tracked_index") or ""
+        fund_kind = self._classify_fund_kind(name, overview.get("fund_type"))
+        index_code = resolve_csi_index_code(tracked)
+
+        # Fees often already present on East Money overview — prefer those.
+        fees = dict(overview.get("fees") or {})
+        allocation: list = []
+        constituents: list = []
+        cons_source: Optional[str] = None
+        degraded: List[str] = []
+
+        enrich = self._enrich_fund_info_parallel(code, index_code, top_constituents)
+        if enrich.get("fees"):
+            fees = {**fees, **enrich["fees"]}
+        allocation = enrich.get("asset_allocation") or []
+        constituents = enrich.get("constituents") or []
+        cons_source = enrich.get("constituents_source")
+        degraded.extend(enrich.get("degraded") or [])
+
+        notes = []
+        if fund_kind == "etf_feeder":
+            notes.append("联接基金：资产以目标 ETF 为主；成分股为跟踪指数近似，非季报逐股权重。")
+        if tracked and not index_code:
+            notes.append(f"未能解析跟踪指数代码，仅返回名称：{tracked}")
+        elif index_code and not constituents:
+            notes.append(f"已解析指数代码 {index_code}，但成分股拉取失败或为空。")
+        for d in degraded:
+            notes.append(d)
+
+        return {
+            "ticker": code,
+            "fund_kind": fund_kind,
+            "name": overview.get("name"),
+            "full_name": overview.get("full_name"),
+            "fund_type": overview.get("fund_type"),
+            "company": overview.get("company"),
+            "custodian": overview.get("custodian"),
+            "manager": overview.get("manager"),
+            "inception": overview.get("inception"),
+            "nav_scale": overview.get("nav_scale"),
+            "share_scale": overview.get("share_scale"),
+            "benchmark": overview.get("benchmark"),
+            "tracked_index": tracked or None,
+            "tracked_index_code": index_code,
+            "fees": fees,
+            "asset_allocation": allocation,
+            "constituents": constituents,
+            "constituents_source": cons_source,
+            "constituents_count": len(constituents),
+            "notes": notes,
+            "degraded": degraded,
+        }
+
+    def _enrich_fund_info_parallel(
+        self,
+        code: str,
+        index_code: Optional[str],
+        top_constituents: int,
+    ) -> dict:
+        """Fetch fees / allocation / constituents in parallel with deadlines."""
+        degraded: List[str] = []
+        fees: dict = {}
+        allocation: list = []
+        constituents: list = []
+        cons_source: Optional[str] = None
+
+        pool = _PoolExecutor(max_workers=3)
+        try:
+            fut_fees = pool.submit(self._fetch_fund_fees_xq, code)
+            fut_alloc = pool.submit(self._fetch_asset_allocation, code)
+            fut_cons = pool.submit(
+                self._fetch_index_constituents,
+                index_code,
+                top_constituents,
+            )
+            deadline = time.monotonic() + _FUND_ENRICH_WALL_TIMEOUT
+
+            def _take(fut, label: str):
+                remaining = min(
+                    _FUND_PART_TIMEOUT,
+                    max(0.05, deadline - time.monotonic()),
+                )
+                try:
+                    return fut.result(timeout=remaining)
+                except FuturesTimeout:
+                    degraded.append(f"{label} timed out — skipped")
+                    return None
+                except Exception:
+                    degraded.append(f"{label} failed — skipped")
+                    return None
+
+            fees_xq = _take(fut_fees, "fees (xueqiu)")
+            if isinstance(fees_xq, dict) and fees_xq:
+                fees = fees_xq
+
+            alloc_res = _take(fut_alloc, "asset_allocation")
+            if isinstance(alloc_res, list) and alloc_res:
+                allocation = alloc_res
+
+            cons_res = _take(fut_cons, "constituents")
+            if isinstance(cons_res, tuple) and len(cons_res) == 2:
+                constituents, cons_source = cons_res
+                if not constituents and cons_source:
+                    degraded.append(f"constituents unavailable ({cons_source}) — skipped")
+        finally:
+            # Do not wait for hung akshare workers after our deadlines.
+            pool.shutdown(wait=False)
+
+        return {
+            "fees": fees,
+            "asset_allocation": allocation,
+            "constituents": constituents,
+            "constituents_source": cons_source,
+            "degraded": degraded,
+        }
+
+    def _fetch_fund_overview(self, code: str) -> dict:
+        try:
+            df = ak.fund_overview_em(symbol=code)
+        except Exception as e:
+            return {"ticker": code, "error": f"fund_overview_em failed: {e}"}
+        if df is None or df.empty:
+            return {"ticker": code, "error": "fund overview not found"}
+
+        row = df.iloc[0]
+
+        def _cell(*keys):
+            for k in keys:
+                if k in row.index and pd.notna(row[k]) and str(row[k]).strip():
+                    return str(row[k]).strip()
+            return None
+
+        code_raw = _cell("基金代码") or code
+        code_clean = code_raw.split("（")[0].split("(")[0].strip()
+
+        # East Money overview already carries rate columns — prefer over Xueqiu.
+        fees = {}
+        for label, keys in (
+            ("基金管理费", ("管理费率",)),
+            ("基金托管费", ("托管费率",)),
+            ("销售服务费", ("销售服务费率",)),
+            ("最高申购费率", ("最高申购费率",)),
+            ("最高赎回费率", ("最高赎回费率",)),
+        ):
+            val = _cell(*keys)
+            if val:
+                fees[label] = val
+
+        return {
+            "ticker": code_clean,
+            "name": _cell("基金简称"),
+            "full_name": _cell("基金全称"),
+            "fund_type": _cell("基金类型"),
+            "company": _cell("基金管理人"),
+            "custodian": _cell("基金托管人"),
+            "manager": _cell("基金经理人", "基金经理"),
+            "inception": _cell("成立日期/规模", "成立日期"),
+            "nav_scale": _cell("净资产规模"),
+            "share_scale": _cell("份额规模"),
+            "benchmark": _cell("业绩比较基准"),
+            "tracked_index": _cell("跟踪标的"),
+            "fees": fees,
+        }
+
+    def _fetch_fund_fees_xq(self, code: str) -> dict:
+        """Optional Xueqiu fee table — may hang; always call under timeout."""
+        fees = {}
+        try:
+            df = ak.fund_individual_detail_info_xq(symbol=code)
+        except Exception:
+            return fees
+        if df is None or df.empty:
+            return fees
+        for _, row in df.iterrows():
+            fee_type = str(row.get("费用类型", "") or "")
+            name = str(row.get("条件或名称", "") or "")
+            value = row.get("费用")
+            key = name or fee_type
+            if key:
+                fees[key] = value
+        return fees
+
+    def _fetch_asset_allocation(self, code: str) -> list:
+        """Optional Xueqiu asset mix — try at most one recent quarter-end."""
+        now = datetime.now()
+        today = now.strftime("%Y%m%d")
+        dates = []
+        for year in (now.year, now.year - 1):
+            for md in ("1231", "0930", "0630", "0331"):
+                d = f"{year}{md}"
+                if d <= today:
+                    dates.append(d)
+        if not dates:
+            return []
+        date = dates[0]
+        try:
+            df = ak.fund_individual_detail_hold_xq(symbol=code, date=date)
+        except Exception:
+            return []
+        if df is None or df.empty:
+            return []
+        if "资产类型" not in df.columns or "仓位占比" not in df.columns:
+            return []
+        rows = []
+        for _, row in df.iterrows():
+            rows.append(
+                {
+                    "asset_type": str(row.get("资产类型")),
+                    "weight_pct": self._safe_float(row.get("仓位占比")),
+                    "as_of": date,
+                }
+            )
+        return rows
+
+    def _fetch_index_constituents(
+        self,
+        index_code: Optional[str],
+        top_n: int,
+    ) -> Tuple[list, Optional[str]]:
+        """Constituents: Sina first, CSI fallback — each attempt has its own timeout."""
+        if not index_code:
+            return [], None
+        limit = top_n if top_n and top_n > 0 else 20
+        source_budget = max(2.0, min(8.0, _FUND_PART_TIMEOUT / 2.0))
+
+        # 1) Sina newest-component (ak.index_stock_cons) — usually faster than CSI.
+        df = run_with_timeout(
+            ak.index_stock_cons,
+            source_budget,
+            index_code,
+            default=None,
+        )
+        if df is not None:
+            parsed = self._parse_constituent_df(
+                df,
+                code_keys=("品种代码", "成分券代码", "代码"),
+                name_keys=("品种名称", "成分券名称", "名称"),
+                limit=limit,
+            )
+            if parsed:
+                return parsed, "sina_index_cons"
+
+        # 2) CSI official xls — historically hangs for minutes.
+        df = run_with_timeout(
+            ak.index_stock_cons_csindex,
+            source_budget,
+            index_code,
+            default=None,
+        )
+        if df is None:
+            return [], "tracked_index_timeout"
+        try:
+            parsed = self._parse_constituent_df(
+                df,
+                code_keys=("成分券代码",),
+                name_keys=("成分券名称",),
+                limit=limit,
+            )
+            if parsed:
+                return parsed, "tracked_index"
+        except Exception:
+            return [], "tracked_index_error"
+        return [], "unavailable"
+
+    @staticmethod
+    def _parse_constituent_df(
+        df: Optional[pd.DataFrame],
+        code_keys: Tuple[str, ...],
+        name_keys: Tuple[str, ...],
+        limit: int,
+    ) -> list:
+        if df is None or df.empty:
+            return []
+        code_col = next((k for k in code_keys if k in df.columns), None)
+        if not code_col:
+            return []
+        name_col = next((k for k in name_keys if k in df.columns), None)
+        out = []
+        for _, row in df.head(limit).iterrows():
+            raw_code = row[code_col]
+            if pd.isna(raw_code):
+                continue
+            code_s = str(raw_code).strip()
+            if code_s.endswith(".0"):
+                code_s = code_s[:-2]
+            name_s = None
+            if name_col is not None and pd.notna(row[name_col]):
+                name_s = str(row[name_col])
+            out.append({"code": code_s.zfill(6), "name": name_s})
+        return out
+
+    @staticmethod
+    def _classify_fund_kind(name: Optional[str], fund_type: Optional[str]) -> str:
+        text = f"{name or ''} {fund_type or ''}"
+        if "联接" in text:
+            return "etf_feeder"
+        if "ETF" in text.upper():
+            return "etf"
+        if "指数" in text:
+            return "index_fund"
+        return "fund"
+
+    @staticmethod
+    def _ticker_looks_like_stock(ticker: str) -> bool:
+        """Stock codes start with 0/3/6; pure fund codes start with 0/1/5.
+        But there's overlap, so we try stock first and only treat as fund
+        if the code explicitly fails stock lookup."""
+        return ticker[0] in ("6", "0", "3") and len(ticker) == 6
+
+    def _get_stock_financials(self, ticker: str) -> dict:
+        df = ak.stock_financial_abstract_ths(symbol=ticker, indicator="按报告期")
+        if df.empty:
+            return {"ticker": ticker, "note": "no financial data available"}
+        latest = df.iloc[0]
+        return {
+            "ticker": ticker,
+            "report_date": str(latest.get("报告期", ""))[:10],
+            "revenue": self._safe_float(latest.get("营业总收入")),
+            "revenue_growth": self._safe_float(latest.get("营业总收入同比增长")),
+            "eps": self._safe_float(latest.get("基本每股收益")),
+            "roe": self._safe_float(latest.get("净资产收益率")),
+            "profit_margin": self._safe_float(latest.get("销售净利率")),
+        }
+
+    def get_market_snapshot(self) -> dict:
+        try:
+            df = ak.stock_zh_index_daily(symbol="sh000001")
+            if df.empty:
+                return {"index_name": "上证指数", "error": "no data"}
+            latest = df.iloc[-1]
+            return {
+                "index_name": "上证指数",
+                "current": float(latest["close"]),
+                "change_pct": round(float(latest.get("pct_chg", 0)), 2),
+            }
+        except Exception as e:
+            return {"index_name": "上证指数", "error": str(e)}
+
+    @staticmethod
+    def _safe_float(value) -> Optional[float]:
+        if value is None or value == "" or value == "--":
+            return None
+        try:
+            return round(float(value), 2)
+        except (ValueError, TypeError):
+            return None
+
+
+class HKMarketAdapter(MarketAdapter):
+    """Hong Kong market data via yfinance.
+
+    Ticker conversion: "02026.HK" or "02026" → strip .HK → strip leading
+    zeros → append .HK → "2026.HK" (yfinance format).
+    """
+
+    MARKET = "HK"
+
+    @staticmethod
+    def _to_yf_ticker(ticker: str) -> str:
+        """Convert user ticker to yfinance HK format.
+
+        "02026.HK" → "2026.HK", "00700.HK" → "0700.HK"
+        """
+        t = ticker.upper().replace(".HK", "").lstrip("0")
+        return f"{t}.HK"
+
+    @staticmethod
+    def _safe_pct(value) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            v = float(value)
+            return round(v, 2) if abs(v) < 100 else v
+        except (ValueError, TypeError):
+            return None
+
+    def get_price(self, ticker: str) -> dict:
+        import yfinance as yf
+
+        from adapters.safe import error_payload
+
+        try:
+            symbol = self._to_yf_ticker(ticker)
+            stock = yf.Ticker(symbol)
+            fast = stock.fast_info
+            price = fast.get("lastPrice")
+            if price is None:
+                # Avoid the slow metadata endpoint unless the fast quote is empty.
+                info = stock.info
+                price = info.get("currentPrice")
+            if price is None:
+                return error_payload(
+                    ValueError(f"No price data for {symbol}"),
+                    ticker=ticker.upper().replace(".HK", ""),
+                )
+            return {
+                "ticker": ticker.upper().replace(".HK", ""),
+                "price": float(price),
+                "currency": "HKD",
+                "change_pct": None,
+                "volume": None,
+                "timestamp": datetime.now().isoformat(),
+            }
+        except Exception as exc:
+            return error_payload(exc, ticker=ticker.upper().replace(".HK", ""))
+
+    def get_kline(self, ticker: str, period: str = "3mo") -> list[dict]:
+        import yfinance as yf
+
+        try:
+            symbol = self._to_yf_ticker(ticker)
+            stock = yf.Ticker(symbol)
+            df = stock.history(period=period)
+            if df.empty:
+                return []
+            return [
+                {
+                    "date": idx.strftime("%Y-%m-%d"),
+                    "open": round(row["Open"], 2),
+                    "high": round(row["High"], 2),
+                    "low": round(row["Low"], 2),
+                    "close": round(row["Close"], 2),
+                    "volume": int(row["Volume"]),
+                }
+                for idx, row in df.iterrows()
+            ]
+        except Exception:
+            return []
+
+    def get_financials(self, ticker: str) -> dict:
+        import yfinance as yf
+
+        from adapters.safe import error_payload
+
+        try:
+            symbol = self._to_yf_ticker(ticker)
+            stock = yf.Ticker(symbol)
+            info = stock.info
+            return {
+                "ticker": ticker.upper().replace(".HK", ""),
+                "name": info.get("longName") or info.get("shortName"),
+                "report_date": str(info.get("lastFiscalYearEnd", ""))[:10]
+                if info.get("lastFiscalYearEnd")
+                else None,
+                "revenue": info.get("totalRevenue"),
+                "revenue_growth": self._safe_pct(info.get("revenueGrowth")),
+                "eps": info.get("trailingEps"),
+                "pe_ratio": info.get("trailingPE"),
+                "pb_ratio": info.get("priceToBook"),
+                "roe": self._safe_pct(info.get("returnOnEquity")),
+                "market_cap": info.get("marketCap"),
+                "sector": info.get("sector"),
+                "industry": info.get("industry"),
+            }
+        except Exception as exc:
+            return error_payload(exc, ticker=ticker.upper().replace(".HK", ""))
+
+    def get_market_snapshot(self) -> dict:
+        import yfinance as yf
+
+        from adapters.safe import error_payload
+
+        try:
+            hsi = yf.Ticker("^HSI")
+            info = hsi.fast_info
+            return {
+                "index_name": "恒生指数",
+                "current": info.get("lastPrice"),
+                "change_pct": self._safe_pct(getattr(info, "regularMarketChangePercent", None)),
+            }
+        except Exception as exc:
+            return error_payload(exc, index_name="恒生指数")

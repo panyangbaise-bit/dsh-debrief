@@ -1,0 +1,348 @@
+"""Telegram Bot notification sender."""
+
+import logging
+import re
+import threading
+from datetime import datetime, timezone
+from html import escape, unescape
+from typing import Optional
+
+from common.time import format_display_time
+from config import config
+
+logger = logging.getLogger(__name__)
+
+# Telegram imposes a 4096-character limit per message.
+MAX_MESSAGE_LENGTH = 4000
+
+# Process-lifetime guard — Streamlit refreshes reset session_state but not this.
+_welcome_sent = False
+_welcome_lock = threading.Lock()
+_callback_poller = None
+_callback_poller_lock = threading.Lock()
+
+
+def _is_configured() -> bool:
+    """Check if Telegram is configured (token + chat_id are set)."""
+    return bool(config.TELEGRAM_BOT_TOKEN and config.TELEGRAM_CHAT_ID)
+
+
+def _md_to_telegram_html(text: str) -> str:
+    """Convert common Markdown patterns to Telegram-compatible HTML.
+
+    Telegram's HTML parse mode only supports a limited set of tags:
+    <b>, <i>, <u>, <s>, <tg-spoiler>, <a>, <code>, <pre>.
+    Tables, headings, and horizontal rules have no HTML equivalent so we
+    reformat them into readable alternatives.
+    """
+    # Protect generated citations from the legacy emphasis/link substitutions.
+    # Telegram has no hover titles, but the same source number remains clickable.
+
+    def _safe_source_url(url: str) -> Optional[str]:
+        """Keep citation links clickable; drop anything unsafe/unparsed."""
+        if not url:
+            return None
+        if url.startswith(("http://", "https://")):
+            return url
+        return None
+
+    citations = []
+
+    def citation_link(match):
+        number, raw_url = match.group(1), match.group(2)
+        url = _safe_source_url(unescape(raw_url))
+        if not url:
+            return f"[{number}]"
+        placeholder = f"PACITATIONTOKEN{len(citations)}END"
+        citations.append(f'<a href="{escape(url, quote=True)}">[{number}]</a>')
+        return placeholder
+
+    text = re.sub(
+        r'\[\\\[(\d+)\\\]\]\(<([^>]+)> "[^"\n]*"\)',
+        citation_link,
+        text,
+    )
+    # Interactive chart references are only meaningful in the report UI.
+    text = re.sub(
+        r"^```kline\s*\n.*?\n```[ \t]*$",
+        "[标注行情图请在报告页面查看]",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    # --- 1. Code blocks (``` ... ```) — convert to <pre> ---
+    text = re.sub(r"```(\w*)\n?(.*?)```", r"<pre>\2</pre>", text, flags=re.DOTALL)
+
+    # --- 2. Inline code (`...`) ---
+    text = re.sub(r"`([^`]+?)`", r"<code>\1</code>", text)
+
+    # --- 3. Horizontal rules ---
+    text = re.sub(r"^[-*_]{3,}$", "▬▬▬▬▬▬▬▬", text, flags=re.MULTILINE)
+
+    # --- 4. Markdown tables → compact text representation ---
+    # Match a markdown table block (header row + separator + body rows).
+    # Use greedy (.+) inside outer |...| so we capture all columns.
+    table_re = re.compile(r"^\|(.+)\|\n\|[-:|\s]+?\|\n((?:\|.+\|[\n\r]?)+)", re.MULTILINE)
+
+    def _table_replacer(m: re.Match) -> str:
+        header = m.group(1)
+        body = m.group(2)
+        headers = [h.strip() for h in header.split("|")]
+        rows = []
+        for line in body.strip().split("\n"):
+            line = line.strip()
+            if not line.startswith("|"):
+                continue
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) == len(headers) and cells:
+                row_parts = [f"<b>{h}:</b> {v}" for h, v in zip(headers, cells)]
+                rows.append(" | ".join(row_parts))
+        return "\n".join(rows) if rows else m.group(0)
+
+    text = table_re.sub(_table_replacer, text)
+
+    # --- 5. Headings (### Title) → bold ---
+    text = re.sub(r"^#{1,4}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
+
+    # --- 6. Bold (**text** or __text__) ---
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
+
+    # --- 7. Italic (*text* or _text_) — but not inside URLs ---
+    text = re.sub(r"(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)", r"<i>\1</i>", text)
+    text = re.sub(r"(?<!_)_(?!_)([^_\n]+?)_(?!_)", r"<i>\1</i>", text)
+
+    # --- 8. Unordered list items ---
+    text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
+
+    # --- 9. Inline links [text](url) ---
+    text = re.sub(r"\[([^\]]+?)\]\(([^)]+?)\)", r'<a href="\2">\1</a>', text)
+
+    # --- 10. Strip unsupported-but-harmless markdown cruft ---
+    # Remove stray | that aren't in HTML tags (leftover from table conversion)
+    # Actually, keep them — they may be intentional separators.
+
+    for index, citation in enumerate(citations):
+        text = text.replace(f"PACITATIONTOKEN{index}END", citation)
+    return text
+
+
+def _escape_unsafe_html(text: str) -> str:
+    """Escape <, >, & outside of valid Telegram HTML tags.
+
+    After _md_to_telegram_html() converts markdown to <b>, <i>, etc.,
+    the output may still contain raw < characters (like "<2%") that
+    Telegram's parser misinterprets as HTML tags. This function escapes
+    those dangerous characters while leaving valid tags untouched.
+    """
+    valid = r"b|i|u|s|tg-spoiler|a|code|pre"
+    tag_re = re.compile(r"<(/?)(?:" + valid + r")(?:\s[^>]*)?>", re.IGNORECASE)
+
+    result = []
+    last_end = 0
+    for match in tag_re.finditer(text):
+        before = text[last_end : match.start()]
+        result.append(before.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        result.append(match.group())
+        last_end = match.end()
+    remaining = text[last_end:]
+    result.append(remaining.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    return "".join(result)
+
+
+def _send_message(text: str, reply_markup: Optional[dict] = None) -> bool:
+    """Send a single Telegram message, falling back to plain-text on HTML parse error."""
+    import requests
+
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": config.TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    resp = requests.post(url, json=payload, timeout=10)
+    if resp.status_code != 200:
+        resp_data = resp.json()
+        # If HTML parse error, retry as plain text so the message still gets delivered.
+        if resp.status_code == 400 and "can't parse entities" in resp_data.get("description", ""):
+            logger.warning(
+                "Telegram HTML parse failed (unbalanced tags), retrying as plain text. "
+                f"Error: {resp.text}"
+            )
+            payload["parse_mode"] = ""
+            resp = requests.post(url, json=payload, timeout=10)
+            if resp.status_code != 200:
+                logger.error(
+                    f"Telegram plain-text retry also failed: {resp.status_code} {resp.text}"
+                )
+                return False
+        else:
+            logger.error(f"Telegram send failed: {resp.status_code} {resp.text}")
+            return False
+
+    logger.info("Telegram message sent OK.")
+    return True
+
+
+def notify(message: str) -> bool:
+    """Send a Telegram notification, splitting long messages if needed.
+
+    Returns True when at least one message was delivered successfully.
+    """
+    if not _is_configured():
+        logger.debug("Telegram not configured, skipping notification.")
+        return False
+
+    html = _md_to_telegram_html(message)
+    html = _escape_unsafe_html(html)
+
+    try:
+        if len(html) <= MAX_MESSAGE_LENGTH:
+            ok = _send_message(html)
+            if ok:
+                logger.info("Telegram notification sent.")
+            return ok
+
+        # Split at paragraph boundaries.
+        parts = html.split("\n\n")
+        chunk = ""
+        sent_any = False
+        for part in parts:
+            candidate = chunk + ("\n\n" if chunk else "") + part
+            if len(candidate) > MAX_MESSAGE_LENGTH and chunk:
+                if _send_message(chunk):
+                    sent_any = True
+                else:
+                    return False
+                chunk = part
+            else:
+                chunk = candidate
+        if chunk:
+            if _send_message(chunk):
+                sent_any = True
+            else:
+                return False
+        if sent_any:
+            logger.info(f"Telegram notification sent in {len(parts)} parts.")
+        return sent_any
+    except Exception as e:
+        logger.error(f"Telegram notification error: {e}")
+        return False
+
+
+def send_welcome() -> bool:
+    """Send a one-time process startup notification (not on page refresh).
+
+    Only marks the process as notified after a successful send, so a transient
+    Telegram/network failure during ``server.py`` bootstrap can be retried on
+    the next ``app/main.py`` init without requiring a special curl.
+    """
+    global _welcome_sent
+    with _welcome_lock:
+        if _welcome_sent:
+            logger.info("Skipping Telegram welcome — already sent this process.")
+            return True
+
+    now = format_display_time(datetime.now(timezone.utc))
+    ok = notify(f"🤖 <b>Portfolio Agent 已启动</b>\n<code>{now}</code>")
+    if ok:
+        with _welcome_lock:
+            _welcome_sent = True
+    else:
+        logger.warning("Telegram welcome not sent; will retry on next bootstrap/init.")
+    return ok
+
+
+def send_deploy_notice() -> bool:
+    """Notify that a deploy/restart finished (used by setup-server.sh)."""
+    now = format_display_time(datetime.now(timezone.utc))
+    return notify(f"🚀 <b>Portfolio Agent 已更新部署</b>\n<code>{now}</code>")
+
+
+def send_urgent_alert(title: str, details: str):
+    """Send a kernel alert (e.g. watchlist reminder) as a Telegram message."""
+    notify(f"⚠️ <b>{title}</b>\n\n{details}")
+
+
+def start_callback_poller():
+    """No-op: the kernel keeps Telegram send-only (no getUpdates long-poll)."""
+    logger.info("Telegram callback poller disabled (send-only mode).")
+    return None
+
+
+def stop_callback_poller():
+    """Request shutdown of the process-wide callback poller (if any)."""
+    if _callback_poller is not None:
+        _callback_poller.stop()
+
+
+def discover_chat_id() -> Optional[str]:
+    """Try to discover the chat ID from recent Telegram updates.
+
+    Returns the chat_id of the most recent message sent to the bot,
+    or None if no messages are found.
+    """
+    if not config.TELEGRAM_BOT_TOKEN:
+        return None
+
+    try:
+        import requests
+
+        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getUpdates"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            logger.error(f"getUpdates failed: {resp.status_code} {resp.text}")
+            return None
+
+        data = resp.json()
+        if not data.get("ok"):
+            logger.error(f"getUpdates returned not ok: {data}")
+            return None
+
+        updates = data.get("result", [])
+        if not updates:
+            logger.info("No Telegram updates found — no one has messaged the bot yet.")
+            return None
+
+        # Return the chat_id from the most recent message
+        latest = updates[-1]
+        chat_id = None
+        if "message" in latest:
+            chat_id = latest["message"]["chat"]["id"]
+        elif "channel_post" in latest:
+            chat_id = latest["channel_post"]["chat"]["id"]
+
+        if chat_id:
+            logger.info(f"Discovered chat ID: {chat_id}")
+        return str(chat_id) if chat_id else None
+
+    except Exception as e:
+        logger.error(f"discover_chat_id error: {e}")
+        return None
+
+
+def get_bot_username() -> Optional[str]:
+    """Get the bot's username via getMe API."""
+    if not config.TELEGRAM_BOT_TOKEN:
+        return None
+
+    try:
+        import requests
+
+        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getMe"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("ok"):
+                return data["result"]["username"]
+    except Exception as e:
+        logger.error(f"getMe error: {e}")
+    return None
+
+
+def is_configured() -> bool:
+    """Public accessor for the configured check."""
+    return _is_configured()

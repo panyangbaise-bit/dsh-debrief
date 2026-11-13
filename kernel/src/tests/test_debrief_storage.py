@@ -1,0 +1,239 @@
+"""Memory compaction state machine, write-back, audit, and catalog ranking."""
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from db.models import (
+    InstrumentCatalog,
+    LongTermMemory,
+    MemoryCompactionRun,
+    MemoryDocument,
+    UserAction,
+)
+from debrief import commands
+from debrief.context import open_engine
+from debrief.errors import KernelError
+
+
+def add_doc(session, content, source_type="decision", instruments=None):
+    import hashlib
+
+    doc = MemoryDocument(
+        source_type=source_type,
+        source_id=0,
+        operation="create",
+        actor="dsn",
+        title=f"{source_type} · {', '.join(instruments or []) or '决策沉淀'}",
+        body=content,
+        snapshot={"content": content},
+        instruments=sorted(set(instruments or [])),
+        occurred_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        known_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        time_quality="recorded",
+        content_hash=hashlib.sha256(content.encode()).hexdigest(),
+    )
+    session.add(doc)
+    session.flush()
+    doc.source_id = doc.id
+    session.commit()
+    return doc
+
+
+@pytest.fixture(autouse=True)
+def no_live_suggest(monkeypatch):
+    from debrief import catalog
+
+    monkeypatch.setattr(catalog, "eastmoney_suggest", lambda *a, **k: [])
+    monkeypatch.setattr(catalog, "coingecko_search", lambda *a, **k: [])
+
+
+@pytest.fixture
+def db(tmp_path):
+    engine = open_engine(tmp_path / "mem.db")
+    yield engine
+    engine.dispose()
+
+
+def test_compact_write_state_machine_and_versioning(db):
+    with Session(db) as session:
+        first = add_doc(session, "建仓理由：服务收入增长", instruments=["US:AAPL"])
+        second = add_doc(session, "加仓复盘：毛利率达标", instruments=["US:AAPL"])
+        first_id, second_id = first.id, second.id
+
+    payload = {
+        "topic": "position-aapl-rationale",
+        "instruments": ["US:AAPL"],
+        "summary": "生态护城河 + 服务收入占比提升。",
+        "evidenceRefs": [{"docId": first_id, "quote": "服务收入"}],
+        "timeRange": {"from": "2026-03-01", "to": "2026-05-01"},
+        "confidence": "high",
+    }
+    with Session(db) as session:
+        result = commands.cmd_memory_compact_write(session, payload)
+    assert result["version"] == 1
+    memory_id = result["id"]
+
+    with Session(db) as session:
+        memory = session.get(LongTermMemory, memory_id)
+        assert memory.summary == "生态护城河 + 服务收入占比提升。"
+        assert memory.version == 1
+        runs = session.scalars(select(MemoryCompactionRun)).all()
+        assert len(runs) == 1
+        assert runs[0].status == "done"
+        assert runs[0].result_memory_id == memory_id
+        assert runs[0].doc_ids == [first_id]
+        # Archived document carries the back-pointer.
+        archived = session.get(MemoryDocument, first_id)
+        assert archived.archived_into == memory_id
+        assert archived.archived_at is not None
+        # Audit trail written.
+        audit = session.scalars(
+            select(UserAction).where(
+                UserAction.action == "memory.compact_write",
+                UserAction.target_type == "long_term_memory",
+            )
+        ).all()
+        assert len(audit) == 1
+
+    # Re-compaction merges and bumps the version; evidence refs merge by docId.
+    payload2 = dict(
+        payload,
+        summary="重压缩：生态护城河 + 端侧 AI 换机。",
+        evidenceRefs=[{"docId": first_id}, {"docId": second_id}],
+        confidence="medium",
+        caveats="2026 年展望未兑现。",
+    )
+    with Session(db) as session:
+        result2 = commands.cmd_memory_compact_write(session, payload2)
+    assert result2["id"] == memory_id
+    assert result2["version"] == 2
+
+    with Session(db) as session:
+        memory = session.get(LongTermMemory, memory_id)
+        assert memory.version == 2
+        assert memory.confidence == "medium"
+        assert memory.caveats == "2026 年展望未兑现。"
+        ref_ids = {ref.get("docId") for ref in memory.evidence_refs}
+        assert ref_ids == {first_id, second_id}
+        runs = session.scalars(select(MemoryCompactionRun).order_by(MemoryCompactionRun.id)).all()
+        assert len(runs) == 2  # a done run per write
+        assert all(run.status == "done" for run in runs)
+
+
+def test_compact_write_failure_marks_run_failed(db, monkeypatch):
+    with Session(db) as session:
+        doc = add_doc(session, "被压缩的决策内容", instruments=["CN:600519"])
+        doc_id = doc.id
+
+    payload = {
+        "topic": "cn-discipline",
+        "instruments": ["CN:600519"],
+        "summary": "纪律总结",
+        "evidenceRefs": [{"docId": doc_id}],
+        "timeRange": {"from": "2026-01-01", "to": "2026-02-01"},
+    }
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("db.repository.record_user_action", boom)
+    with Session(db) as session:
+        with pytest.raises(KernelError):
+            commands.cmd_memory_compact_write(session, payload)
+    with Session(db) as session:
+        run = session.scalars(select(MemoryCompactionRun)).one()
+        assert run.status == "failed"
+        assert "disk full" in run.error
+        assert run.retry_at is not None
+        # Failure must not leave a partial long-term memory.
+        assert session.scalar(select(LongTermMemory.id)) is None
+
+
+def test_compact_write_validates_refs(db):
+    with Session(db) as session:
+        with pytest.raises(KernelError) as excinfo:
+            commands.cmd_memory_compact_write(
+                session,
+                {
+                    "topic": "t",
+                    "instruments": [],
+                    "summary": "s",
+                    "evidenceRefs": [{"docId": 999999}],
+                    "timeRange": {"from": "2026-01-01", "to": "2026-02-01"},
+                },
+            )
+    assert excinfo.value.code == "DEBRIEF_VALIDATION"
+
+
+def test_memory_add_writes_audit_and_indexes(db):
+    with Session(db) as session:
+        result = commands.cmd_memory_add(
+            session,
+            {
+                "sourceType": "decision",
+                "content": "止盈纪律：单标的权重上限 15%。",
+                "instruments": ["US:NVDA"],
+            },
+        )
+    doc_id = result["docId"]
+    with Session(db) as session:
+        doc = session.get(MemoryDocument, doc_id)
+        assert doc.source_id == doc_id
+        assert doc.indexed_at is not None
+        audit = session.scalars(
+            select(UserAction).where(
+                UserAction.action == "memory.add",
+                UserAction.target_type == "memory_document",
+                UserAction.target_id == str(doc_id),
+            )
+        ).all()
+        assert len(audit) == 1
+        # Immediately searchable through FTS.
+        hits = commands._short_hits(session, "止盈纪律")
+        assert any(item["evidence"][0]["docId"] == doc_id for item in hits)
+
+
+def test_compact_candidates_window_and_batching(db):
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=90)
+    with Session(db) as session:
+        for i in range(5):
+            doc = add_doc(session, f"旧决策 {i}", instruments=["CN:600519"])
+            doc.occurred_at = old + timedelta(days=i)
+            session.commit()
+        fresh = add_doc(session, "新决策", instruments=["CN:600519"])
+        fresh.occurred_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        session.commit()
+
+    with Session(db) as session:
+        result = commands.cmd_memory_compact_candidates(session)
+    assert result["pendingCount"] == 5
+    assert len(result["batches"]) == 1
+    assert result["batches"][0]["topic"] == "decision:CN:600519"
+    assert len(result["batches"][0]["items"]) == 5
+    ids = {item["docId"] for item in result["batches"][0]["items"]}
+    assert len(ids) == 5
+
+
+def test_catalog_upsert_and_rank(db):
+    from debrief.catalog import _upsert_rows
+    from debrief.catalog import search as catalog_search
+
+    rows = [
+        {"market": "US", "symbol": "AAPL", "name": "苹果", "currency": "USD", "asset_class": "stock", "pinyin_alias": ""},
+        {"market": "US", "symbol": "MSFT", "name": "微软", "currency": "USD", "asset_class": "stock", "pinyin_alias": ""},
+        {"market": "US", "symbol": "AAPX", "name": "甲科技", "currency": "USD", "asset_class": "stock", "pinyin_alias": ""},
+    ]
+    with Session(db) as session:
+        assert _upsert_rows(session, rows) == 3
+        # Ranking: exact code > code prefix.
+        items, source = catalog_search(session, "US", "AAPL")
+        assert [item["symbol"] for item in items] == ["AAPL"]
+        items, _ = catalog_search(session, "US", "AAP")
+        assert [item["symbol"] for item in items] == ["AAPL", "AAPX"]
+        assert "akshare catalog" in source
+        # Re-upsert updates in place (unique market+symbol).
+        _upsert_rows(session, [dict(rows[0], name="苹果公司")])
+        assert session.scalars(select(InstrumentCatalog)).all()[0].name == "苹果公司"

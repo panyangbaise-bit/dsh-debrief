@@ -132,13 +132,25 @@ typescript / vitest / eslint / prettier 四项。
 - [docs/troubleshooting.md](docs/troubleshooting.md) — 故障排查
 - [docs/faq.md](docs/faq.md) — 常见问题
 
+## Kernel / 数据内核
+
+The data kernel (Python, no model, no agent) lives in [`kernel/`](kernel/): the
+`debrief` CLI over a local SQLite database, its tests, and the wheels shipped
+with the npm package. DSH is the host and the only agent runtime — every model
+call happens in a DSH session; the plugin only bridges the kernel over its JSON
+CLI. `kernel/` 内置数据内核（Python、无模型、无 Agent）：SQLite 上的 `debrief`
+CLI、测试与随包分发的离线轮子；DSH 是宿主与唯一 agent 运行时，插件只通过
+JSON CLI 桥接内核。See [`kernel/README.md`](kernel/README.md) and
+[`kernel/docs/cli.md`](kernel/docs/cli.md) for the contract and how to rebuild
+the wheel.
+
 ## Design / 设计
 
-See `DSH-DEPLOY-PLUGIN-DESIGN.md` in the upstream workspace for the full
+See [`docs/architecture.md`](docs/architecture.md) for this project's
 architecture (kernel without agent, DSH session log as the only trace, DSH
-Schedule `new_once` for scheduled tasks, owner-only access). 完整架构见上游工作区
-`DSH-DEPLOY-PLUGIN-DESIGN.md`（内核去 Agent、DSH session log 唯一 trace、
-DSH Schedule `new_once` 定时任务、仅 owner 访问）。
+Schedule `new_once` for scheduled tasks, owner-only access). 完整架构见
+[`docs/architecture.md`](docs/architecture.md)（内核去 Agent、DSH session log
+唯一 trace、DSH Schedule `new_once` 定时任务、仅 owner 访问）。
 
 ## License
 

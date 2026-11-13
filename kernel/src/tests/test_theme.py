@@ -1,0 +1,115 @@
+from app.styles.theme import (
+    build_locale_toggle_html,
+    build_theme_css,
+    build_theme_html,
+    load_cyberpunk_css,
+)
+
+
+def test_load_cyberpunk_css_returns_nonempty_when_file_exists(tmp_path, monkeypatch):
+    css_file = tmp_path / "cyberpunk.css"
+    css_file.write_text(":root { --cp-cyan: #00f0ff; }", encoding="utf-8")
+    monkeypatch.setattr("app.styles.theme.CSS_PATH", css_file)
+    assert "--cp-cyan" in load_cyberpunk_css()
+
+
+def test_load_cyberpunk_css_returns_empty_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.styles.theme.CSS_PATH", tmp_path / "missing.css")
+    assert load_cyberpunk_css() == ""
+
+
+def test_build_theme_css_includes_fonts_and_host_hide():
+    css = build_theme_css(":root{--cp-bg:#05050a;}")
+    assert "--cp-bg" in css
+    assert "fonts.googleapis.com" in css
+    assert "IBM+Plex+Mono" in css
+    assert "stElementContainer" in css
+
+
+def test_build_theme_html_wraps_style():
+    html = build_theme_html(":root{--cp-bg:#05050a;}")
+    assert html.startswith("<style>")
+    assert html.rstrip().endswith("</style>")
+
+
+def test_mobile_sidebar_layout_only_applies_when_expanded():
+    """A collapsed sidebar must not retain the full-width drawer geometry."""
+    css = load_cyberpunk_css()
+    expanded_selector = 'section[data-testid="stSidebar"][aria-expanded="true"]'
+
+    assert expanded_selector in css
+    mobile_sidebar_start = css.index("/* Mobile sidebar drawer")
+    mobile_sidebar_end = css.index("/* EN/CN toggle", mobile_sidebar_start)
+    mobile_sidebar_css = css[mobile_sidebar_start:mobile_sidebar_end]
+    assert '[data-testid="stSidebar"] {' not in mobile_sidebar_css
+
+
+def test_chrome_hide_rules_keep_header_toolbar_visible():
+    """stToolbar hosts stExpandSidebarButton (reopens a collapsed sidebar).
+
+    Mobile auto-collapses the sidebar, so hiding the whole toolbar removes
+    the only way to open navigation. Hide Deploy + main menu individually.
+    """
+    css = load_cyberpunk_css()
+    assert 'div[data-testid="stToolbar"]' not in css
+    assert '[data-testid="stAppDeployButton"]' in css
+    assert '[data-testid="stMainMenu"]' in css
+
+
+def test_locale_toggle_is_parent_anchor_not_iframe_navigation():
+    """Component iframes are sandboxed without allow-top-navigation, so
+    script-driven navigation throws SecurityError. The toggle must be a
+    plain <a href> living in the parent document."""
+    html = build_locale_toggle_html("en")
+    assert 'createElement("a")' in html
+    assert "location.assign" not in html
+    assert "location.href =" not in html
+    assert '"zh"' in html  # next locale baked into the href
+
+    html_zh = build_locale_toggle_html("zh")
+    assert '"en"' in html_zh
+
+
+def test_ask_agent_fixed_css_targets_dock_host_class_not_has_selector():
+    """:has(.pa-ask-agent-root) on stVerticalBlock pins the whole page — forbidden."""
+    css = load_cyberpunk_css()
+    start = css.index("Ask Agent floating chat")
+    ask_css = css[start:]
+    assert ".pa-ask-agent-dock-host" in ask_css
+    assert "position: fixed" in ask_css
+    # Actual selector (not the warning comment) must not fix via :has on VerticalBlock.
+    assert 'stVerticalBlock"]:has(.pa-ask-agent-root)' not in ask_css
+    assert "stVerticalBlock]:has(.pa-ask-agent-root)" not in ask_css
+
+
+def test_ask_agent_open_panel_css_is_resizable():
+    css = load_cyberpunk_css()
+    start = css.index("Ask Agent floating chat")
+    ask_css = css[start:]
+    # Native CSS resize is bottom-right only; custom NW handle scales both axes.
+    assert "resize: both" not in ask_css
+    assert ".pa-ask-agent-resize-handle" in ask_css
+    assert "nwse-resize" in ask_css
+    assert ":not(.pa-ask-agent-dock-open)" in ask_css
+    assert "stForm" in ask_css
+    assert "position: sticky" in ask_css
+    assert "flex: 1 1 auto" in ask_css
+
+
+def test_ask_agent_dock_js_refuses_main_page_hosts():
+    from app.styles.theme import build_ask_agent_dock_html
+
+    html = build_ask_agent_dock_html()
+    assert "pa-ask-agent-dock-host" in html
+    assert "looksLikeMainPage" in html
+    assert "stDataFrame" in html
+    assert "deepestBlockContaining" in html
+    # Mid-reply undock bug: nested-block count must not reject the host.
+    assert "if (nested > 8)" not in html
+    assert "SIZE_KEY" in html
+    assert "pa-ask-agent-resize-handle" in html
+    assert "pa-ask-agent-resize-el" in html
+    assert "ensureHandle" in html
+    assert "pointerdown" in html
+    assert "fillComposer" in html
+    assert "r.left" in html
