@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { normalizeConfig } from '../src/host/config'
 import { defineTools, validateWritePayload, writePayloadShapes } from '../src/host/tools'
 import { validate } from '../src/host/schema'
 
-const config = normalizeConfig({ cliPath: 'debrief', timeoutMs: 5000 }, {})
+// A path that cannot exist, so the "CLI absent" assertions stay deterministic on
+// a host that does have `debrief` on PATH (the plugin's own server deployment).
+const MISSING_CLI = join(tmpdir(), `debrief-missing-cli-${process.pid}`, 'debrief')
+const config = normalizeConfig({ cliPath: MISSING_CLI, timeoutMs: 5000 }, {})
 
 describe('tool registry', () => {
   const tools = defineTools(config)
@@ -63,7 +68,7 @@ describe('tool registry', () => {
   it('routes debrief_memory to compact-candidates when requested', async () => {
     const tool = tools.find((candidate) => candidate.name === 'debrief_memory')!
     const result = await tool.execute({ compactCandidates: true }, { signal: new AbortController().signal })
-    // CLI absent in tests: the arg check must pass and the failure comes from exec, not DEBRIEF_ARGS.
+    // CLI absent by construction: the arg check must pass and the failure comes from exec.
     expect(result).toMatchObject({ ok: false, error: { code: 'DEBRIEF_CLI_NOT_FOUND' } })
   })
 
@@ -76,7 +81,7 @@ describe('tool registry', () => {
   it('maps debrief_instruments arguments to the CLI search subcommand', async () => {
     const tool = tools.find((candidate) => candidate.name === 'debrief_instruments')!
     const result = await tool.execute({ market: 'cn', query: 'maotai' }, { signal: new AbortController().signal })
-    // The real CLI is absent in tests; the only invariant is a structured envelope.
+    // The configured CLI path cannot exist; the only invariant is a structured envelope.
     expect(result).toHaveProperty('ok')
     expect(result).toHaveProperty('error')
   })
