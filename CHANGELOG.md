@@ -44,6 +44,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   real integration test that bootstraps the bundled wheel offline with uv and
   runs the console script (skipped where uv is unavailable).
 
+### Fixed
+
+- Whitelisted write tools passed their multi-word subcommand to the kernel as a
+  single argv token (`'memory compact-write'`), so argparse answered
+  `DEBRIEF_USAGE invalid command line` and every write failed:
+  `debrief_memory_compact_write`, `debrief_memory_add` and
+  `debrief_report_create` were affected. `ToolSpec.command` is now an argv token
+  array (`['memory', 'compact-write']`) and is spread into `runCli`, so read,
+  write and approval-gated edit tools all reach the CLI as separate tokens.
+  Covered by `tests/tool-argv.test.ts`, which records the argv a fake CLI
+  receives (three cases fail on the previous implementation).
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

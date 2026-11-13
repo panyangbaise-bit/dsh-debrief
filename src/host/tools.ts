@@ -30,7 +30,8 @@ interface ToolSpec {
   description: string
   parameters: Record<string, JsonNode>
   required: readonly string[]
-  command: string
+  /** CLI subcommand path, one element per argv token (`['memory', 'compact-write']`). */
+  command: readonly string[]
   /** CLI argument vector for the command; empty for the passthrough tools. */
   argsOf?: (args: Record<string, unknown>) => readonly string[]
   /** Write kind whose validated payload travels on stdin (whitelisted writes). */
@@ -85,12 +86,12 @@ function tool(config: DebriefConfig, spec: ToolSpec): ToolDefinition {
             error: checked.error ?? { code: 'DEBRIEF_ARGS', message: 'invalid write payload' },
           }
         }
-        return runCli(config, [spec.command], { signal: exec.signal, stdin: checked.stdin })
+        return runCli(config, [...spec.command], { signal: exec.signal, stdin: checked.stdin })
       }
       if (spec.argsOf) {
-        return runCli(config, [spec.command, ...spec.argsOf(args)], { signal: exec.signal })
+        return runCli(config, [...spec.command, ...spec.argsOf(args)], { signal: exec.signal })
       }
-      return runCli(config, [spec.command], { signal: exec.signal })
+      return runCli(config, [...spec.command], { signal: exec.signal })
     },
   }
 }
@@ -206,7 +207,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         'Read the current portfolio holdings: symbol, name, quantity, cost, last price, market value, unrealized PnL, and weight.',
       parameters: { status: sProp("Only open positions when 'open'; all positions when omitted.") },
       required: [],
-      command: 'holdings',
+      command: ['holdings'],
       argsOf: (a) => (a.status ? ['--status', String(a.status)] : []),
     }),
     tool(config, {
@@ -218,7 +219,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         offset: iProp('Zero-based row offset. Default 0.'),
       },
       required: [],
-      command: 'transactions',
+      command: ['transactions'],
       argsOf: (a) => [
         ...(a.ticker ? ['--ticker', String(a.ticker)] : []),
         ...(a.limit ? ['--limit', String(a.limit)] : []),
@@ -231,7 +232,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         'Read the watchlist: instruments under observation with target price, distance to target, and alert state.',
       parameters: {},
       required: [],
-      command: 'watchlist',
+      command: ['watchlist'],
     }),
     tool(config, {
       name: 'debrief_instruments',
@@ -242,7 +243,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         query: sProp('Code, name, or pinyin fragment; at least 2 characters.'),
       },
       required: ['market', 'query'],
-      command: 'instruments',
+      command: ['instruments'],
       argsOf: (a) => ['search', '--market', String(a.market), '--query', String(a.query)],
     }),
     tool(config, {
@@ -253,7 +254,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         market: sProp('One of: us, cn, hk, crypto. Latest report of that market when id is omitted.'),
       },
       required: [],
-      command: 'report',
+      command: ['report'],
       argsOf: (a) => (a.id ? ['--id', String(a.id)] : ['latest', ...(a.market ? ['--market', String(a.market)] : [])]),
     }),
     tool(config, {
@@ -265,7 +266,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         compactCandidates: bProp('Return the out-of-window compaction candidate list (for the debrief-compact skill).'),
       },
       required: [],
-      command: 'memory',
+      command: ['memory'],
       argsOf: (a) =>
         a.compactCandidates === true ? ['compact-candidates'] : ['search', '--query', String(a.query ?? '')],
       checkArgs: (a) =>
@@ -279,7 +280,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         'Prepare an after-market analysis input package for one market: recent quotes, news, and candidate memory evidence. Synthesize the conclusion yourself from the package, then present it; the package is bounded and ready to read.',
       parameters: { market: sProp('One of: us, cn, hk, crypto.') },
       required: ['market'],
-      command: 'analysis',
+      command: ['analysis'],
       argsOf: (a) => ['prepare', '--market', String(a.market)],
     }),
     tool(config, {
@@ -288,7 +289,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         'List recent scheduled-task runs from the job ledger: kind, time, status, duration, and error code when failed.',
       parameters: {},
       required: [],
-      command: 'job',
+      command: ['job'],
       argsOf: () => ['list'],
     }),
     tool(config, {
@@ -297,7 +298,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         'Read the dashboard aggregate: KPIs (total assets, daily and total return), equity and cumulative-return series, portfolio composition, holdings, and watchlist in one payload.',
       parameters: { range: sProp('Series length in days: 30, 90, 200, or 365. Default 90.') },
       required: [],
-      command: 'dashboard',
+      command: ['dashboard'],
       argsOf: (a) => (a.range ? ['--range', String(a.range)] : []),
     }),
     tool(config, {
@@ -309,7 +310,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         limit: iProp('Maximum items. Default 20, max 100.'),
       },
       required: [],
-      command: 'news',
+      command: ['news'],
       argsOf: (a) => [
         'latest',
         ...(a.market ? ['--market', String(a.market)] : []),
@@ -349,7 +350,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         jobId: sProp('Optional job_runs ledger id from debrief_analyze; links the report to its run.'),
       },
       required: ['market', 'title', 'summary'],
-      command: 'report create',
+      command: ['report', 'create'],
       writeKind: 'reportCreate',
     }),
     tool(config, {
@@ -387,7 +388,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         caveats: sProp('Known limitations and unknowns.'),
       },
       required: ['topic', 'instruments', 'summary', 'evidenceRefs', 'timeRange'],
-      command: 'memory compact-write',
+      command: ['memory', 'compact-write'],
       writeKind: 'compactWrite',
     }),
     tool(config, {
@@ -406,7 +407,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         occurredAt: sProp('Optional ISO timestamp; defaults to now.'),
       },
       required: ['sourceType', 'content', 'instruments'],
-      command: 'memory add',
+      command: ['memory', 'add'],
       writeKind: 'memoryAdd',
     }),
     // ---- v2 edits: one operation, two callers (UserActions pattern) ---------
@@ -424,7 +425,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         cost: nProp('Average cost per unit.'),
       },
       required: ['market', 'symbol', 'quantity', 'cost'],
-      command: 'holdings add',
+      command: ['holdings', 'add'],
       edit: { entity: 'holding', action: 'add' },
     }),
     tool(config, {
@@ -439,7 +440,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         cost: nProp('New average cost per unit.'),
       },
       required: [],
-      command: 'holdings update',
+      command: ['holdings', 'update'],
       edit: { entity: 'holding', action: 'update' },
     }),
     tool(config, {
@@ -452,7 +453,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         symbol: sProp('Instrument symbol (with market).'),
       },
       required: [],
-      command: 'holdings remove',
+      command: ['holdings', 'remove'],
       edit: { entity: 'holding', action: 'remove' },
     }),
     tool(config, {
@@ -467,7 +468,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         alert: bProp('Optional alert state; defaults to the kernel default.'),
       },
       required: ['market', 'symbol'],
-      command: 'watchlist add',
+      command: ['watchlist', 'add'],
       edit: { entity: 'watchlist', action: 'add' },
     }),
     tool(config, {
@@ -482,7 +483,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         alert: bProp('New alert state.'),
       },
       required: [],
-      command: 'watchlist update',
+      command: ['watchlist', 'update'],
       edit: { entity: 'watchlist', action: 'update' },
     }),
     tool(config, {
@@ -495,7 +496,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         symbol: sProp('Instrument symbol (with market).'),
       },
       required: [],
-      command: 'watchlist remove',
+      command: ['watchlist', 'remove'],
       edit: { entity: 'watchlist', action: 'remove' },
     }),
   ]
