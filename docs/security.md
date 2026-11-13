@@ -13,7 +13,7 @@
 ## 依赖与供应链
 
 - 零运行时依赖；devDependencies 仅 typescript / vitest / eslint / prettier。
-- CI 跑 `npm audit`（见 workflow）；依赖升级交给 renovate/dependabot。
+- 发布前手动跑 `npm audit` / `npm pack --dry-run` 审计依赖与产物（仓库不含 CI 流水线）。
 
 ## 报告漏洞
 
@@ -48,7 +48,7 @@
 
 - Zero runtime dependencies; devDependencies are typescript / vitest / eslint /
   prettier only.
-- CI runs `npm audit` (see the workflow); upgrades go through
+- `npm audit` / `npm pack --dry-run` run manually before each release (this repository ships no CI pipeline).
   renovate/dependabot.
 
 ## Reporting a vulnerability
