@@ -1,4 +1,4 @@
-"""Distribution guardrails: CLI stays collector-free, slim wheel is slim."""
+"""Distribution guardrails: CLI stays collector-free, wheel stays self-contained."""
 
 import ast
 import json
@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-WHEEL_VERSION = "0.2.2"  # bump on EVERY wheel content change (cache-key rule)
+WHEELS_DIR = REPO_ROOT.parent / "wheels"  # bundled with the npm package (kernel/wheels/)
+WHEEL_VERSION = "0.2.3"  # bump on EVERY wheel content change (cache-key rule)
 COLLECTOR_MODULES = (
     "yfinance",
     "akshare",
@@ -92,14 +93,19 @@ def test_worker_without_collectors_returns_structured_error(seeded_db, run_cli, 
 
 def test_artifacts_has_no_stale_wheel_versions():
     """Same-version overwrite is forbidden: pip/uv caches key on the filename."""
-    assert list((REPO_ROOT / "artifacts").glob("portfolio_agent_kernel-*.whl")) == [
-        REPO_ROOT / "artifacts" / f"portfolio_agent_kernel-{WHEEL_VERSION}-py3-none-any.whl"
+    assert list((WHEELS_DIR).glob("portfolio_agent_kernel-*.whl")) == [
+        WHEELS_DIR / f"portfolio_agent_kernel-{WHEEL_VERSION}-py3-none-any.whl"
     ]
 
 
-def test_committed_slim_wheel_contains_only_cli_modules():
-    wheels = sorted((REPO_ROOT / "artifacts").glob("portfolio_agent_kernel-*.whl"))
-    assert wheels, "no committed slim wheel in artifacts/"
+def test_committed_wheel_carries_cli_surface_and_no_legacy_app():
+    """The committed wheel ships the full pure-Python surface (CLI + news/FX/
+    notify adapters) so managed-mode realtime news and Telegram work from a
+    wheel-only install; heavy market adapters are lazy and their deps live
+    behind the collectors extra. No removed `app/` Streamlit code may return.
+    """
+    wheels = sorted(WHEELS_DIR.glob("portfolio_agent_kernel-*.whl"))
+    assert wheels, "no committed kernel wheel in kernel/wheels/"
     wheel = wheels[-1]
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
@@ -116,18 +122,20 @@ def test_committed_slim_wheel_contains_only_cli_modules():
             "debrief",
             "domain",
             "memory",
+            "notifier",
+            "runtime.py",
+            "scheduler",
             f"portfolio_agent_kernel-{WHEEL_VERSION}.dist-info",
         }
         assert {"debrief", "db", "config.py"} <= top
-        # CLI needs the lightweight FX layer; market adapters stay out.
+        # Realtime paths that must work from a wheel-only (managed) install.
         assert "adapters/fx.py" in names
         assert "adapters/base.py" in names
         assert "adapters/__init__.py" in names
-        assert not any(
-            name.startswith(("app/", "scheduler/", "notifier/")) for name in names
-        )
-        adapter_files = [name for name in names if name.startswith("adapters/")]
-        assert adapter_files == ["adapters/__init__.py", "adapters/base.py", "adapters/fx.py"]
+        assert "adapters/news.py" in names
+        assert "notifier/telegram.py" in names
+        # Removed Streamlit UI code must never leak back into the wheel.
+        assert not any(name.startswith("app/") for name in names)
         metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
         metadata = archive.read(metadata_name).decode()
         assert f"Version: {WHEEL_VERSION}" in metadata
@@ -144,8 +152,8 @@ def test_committed_slim_wheel_contains_only_cli_modules():
 
 
 def _latest_wheel() -> Path:
-    wheels = sorted((REPO_ROOT / "artifacts").glob("portfolio_agent_kernel-*.whl"))
-    assert wheels, "no committed slim wheel in artifacts/"
+    wheels = sorted(WHEELS_DIR.glob("portfolio_agent_kernel-*.whl"))
+    assert wheels, "no committed kernel wheel in kernel/wheels/"
     return wheels[-1]
 
 

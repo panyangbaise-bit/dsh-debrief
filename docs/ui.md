@@ -11,18 +11,18 @@
 
 ## 卡片矩阵
 
-| 工具                                        | 卡片       | 头部                                              | 主体                                                           | 尾部                                   |
-| ------------------------------------------- | ---------- | ------------------------------------------------- | -------------------------------------------------------------- | -------------------------------------- |
-| debrief_holdings                            | 持仓总览卡 | 总市值/今日盈亏/总盈亏（涨跌色）                  | 持仓表：代码 名称 数量 成本 现价 市值 盈亏% 权重（权重迷你条） | 计数 · 更新于                          |
-| debrief_transactions                        | 成交明细卡 | 共 N 笔                                           | 成交表：时间 方向 代码 名称 数量 价格 金额 状态                | 空态文案                               |
-| debrief_watchlist                           | 监察表卡   | N 自选                                            | 表：代码 名称 现价 涨跌% 关注价 距关注价 提醒                  | 引导添加文案                           |
-| debrief_report                              | 报告卡     | 市场 badge + 标题 + 生成时间                      | 摘要 + SVG 折线图 + 指标行                                     | 展开全文 / 收起                        |
-| debrief_memory                              | 记忆证据卡 | 分层 badge（长期/短期）+ 主题 + 置信度 + 时间范围 | 摘要 + 证据引用（`[[cite:doc:id]]` 可展开看原文）              | 空态文案                               |
-| debrief_analyze                             | 任务进度卡 | jobId + 状态点 + preparedAt                       | 行情快照 / 新闻 / 记忆候选三段                                 | guidance 提示                          |
-| debrief_jobs                                | 运行记录卡 | N 条                                              | 时间线列表（状态点：成功/失败/运行中，失败显示错误码）         | 台账说明                               |
-| debrief_dashboard                           | 仪表盘卡   | 近 N 天                                           | KPI 行 + 资产/收益折线 + 成分环形图 + 持仓/监察表              | 添加入口引导                           |
-| debrief_news                                | 新闻速览卡 | N 条 · 抓取时间                                   | 时间线列表（标题/时间/市场·来源）                              | 空态文案                               |
-| debrief_report_create / compact_write / add | 写回结果卡 | 报告已写回 / 记忆压缩已写回 / 记忆已沉淀          | ID（+版本/状态）                                               | 审计标注（已入内核 user_actions 审计） |
+| 工具                                        | 卡片       | 头部                                              | 主体                                                                                     | 尾部                                   |
+| ------------------------------------------- | ---------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------- |
+| debrief_holdings                            | 持仓总览卡 | 总市值/今日盈亏/总盈亏（涨跌色）                  | 持仓表：代码 名称 数量 成本 现价 市值 盈亏% 权重（权重迷你条；成本/现价/市值带币种单位） | 计数 · 更新于                          |
+| debrief_transactions                        | 成交明细卡 | 共 N 笔                                           | 成交表：时间 方向 代码 名称 数量 价格 金额 状态                                          | 空态文案                               |
+| debrief_watchlist                           | 监察表卡   | N 自选                                            | 表：代码 名称 现价 涨跌% 关注价 距关注价 提醒（现价/关注价带币种单位）                   | 引导添加文案                           |
+| debrief_report                              | 报告卡     | 市场 badge + 标题 + 生成时间                      | 摘要 + SVG 折线图 + 指标行                                                               | 展开全文 / 收起                        |
+| debrief_memory                              | 记忆证据卡 | 分层 badge（长期/短期）+ 主题 + 置信度 + 时间范围 | 摘要 + 证据引用（`[[cite:doc:id]]` 可展开看原文）                                        | 空态文案                               |
+| debrief_analyze                             | 任务进度卡 | jobId + 状态点 + preparedAt                       | 行情快照 / 新闻 / 记忆候选三段                                                           | guidance 提示                          |
+| debrief_jobs                                | 运行记录卡 | N 条                                              | 时间线列表（状态点：成功/失败/运行中，失败显示错误码）                                   | 台账说明                               |
+| debrief_dashboard                           | 仪表盘卡   | 近 N 天                                           | KPI 行 + 资产/收益折线 + 成分环形图 + 持仓/监察表                                        | 添加入口引导                           |
+| debrief_news                                | 新闻速览卡 | N 条 · 更新于                                     | 时间线列表（标题/时间/来源，条目带原文链接）                                             | 空态文案                               |
+| debrief_report_create / compact_write / add | 写回结果卡 | 报告已写回 / 记忆压缩已写回 / 记忆已沉淀          | ID（+版本/状态）                                                                         | 审计标注（已入内核 user_actions 审计） |
 
 ## 降级路径（绝不 crash slot）
 
@@ -42,14 +42,19 @@
 
 ## 投资组合页面结构（自上而下）
 
-1. 标题 + 时间范围 chips（近 30 天 / 90 天 / 200 天 / 近一年），切换重绘两条折线。
-2. KPI 行（4 格，<768px 自动换行）：总资产 / 今日收益 / 总收益 / 年化收益。
-3. 资产变化面积图（跨 2 列）。
-4. 收益折线（0 基线虚线，末值涨跌色）。
+1. 标题 + 时间范围 chips（近 30 天 / 90 天 / 200 天 / 近一年）+ 显示币种 chips
+   （CNY / USD / HKD，汇率可用时出现），切换重绘两条折线并换算 KPI。
+2. KPI 行（4 格，<768px 自动换行）：总资产 / 今日收益 / 总收益 / 年化收益
+   （货币类数值随显示币种换算）；其下附汇率说明（1 CNY ≈ X CCY · 更新时间）。
+3. 资产变化面积图（跨 2 列，随显示币种换算）。
+4. 收益折线（0 基线虚线，末值涨跌色；百分比不换算）。
 5. 成分环形图（stroke-dasharray 分段 + 图例，中心 = 持仓数）。
-6. 持仓表（头部「+ 添加持仓」，v2 占位入口）。
-7. 监察表（头部「+ 添加自选」，v2 占位入口）。
+6. 持仓表（头部「+ 添加持仓」；成本/现价/市值带币种单位：A股个股与基金 CNY、美股与加密 USD、港股 HKD）。
+7. 监察表（头部「+ 添加自选」；现价/关注价带币种单位）。
 8. 底部提示：添加入口 v2 走 DSH 确认流。
+
+汇率来源：dashboard 载荷内 `fx` 块（open.er-api.com 免费接口，秒级延迟可接受）；
+接口失败时 `fx` 为 null，页面隐藏币种 chips 并仅按 CNY 展示。
 
 ## v2 编辑能力（投资组合页面）
 
@@ -92,18 +97,18 @@
 
 ## Card matrix
 
-| Tool                                        | Card            | Header                                                | Body                                                                  | Footer                           |
-| ------------------------------------------- | --------------- | ----------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- |
-| debrief_holdings                            | Holdings        | Total value / day P&L / total P&L (up-down colors)    | Table: symbol, name, qty, cost, price, value, P&L%, weight (mini bar) | Count · as-of                    |
-| debrief_transactions                        | Trades          | N trades                                              | Table: time, side, symbol, name, qty, price, amount, status           | Empty state                      |
-| debrief_watchlist                           | Watchlist       | N watched                                             | Table: symbol, name, price, chg%, target, distance, alert             | Add guidance                     |
-| debrief_report                              | Report          | Market badge + title + generated-at                   | Summary + SVG line chart + metrics                                    | Expand/collapse full text        |
-| debrief_memory                              | Memory evidence | Layer badge (long/short) + topic + confidence + range | Summary + expandable evidence (`[[cite:doc:id]]`)                     | Empty state                      |
-| debrief_analyze                             | Analysis job    | jobId + status dot + preparedAt                       | Quotes / news / memory candidates sections                            | Guidance hint                    |
-| debrief_jobs                                | Job ledger      | N entries                                             | Timeline (status dots; failures show error code)                      | Ledger note                      |
-| debrief_dashboard                           | Dashboard       | Last N days                                           | KPIs + equity/returns charts + donut + tables                         | Add guidance                     |
-| debrief_news                                | News            | N items · fetched-at                                  | Timeline (title/time/market·source)                                   | Empty state                      |
-| debrief_report_create / compact_write / add | Write result    | Report written / Memory compacted / Memory added      | ID (+version/status)                                                  | Audit note (kernel user_actions) |
+| Tool                                        | Card            | Header                                                | Body                                                                                                         | Footer                           |
+| ------------------------------------------- | --------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| debrief_holdings                            | Holdings        | Total value / day P&L / total P&L (up-down colors)    | Table: symbol, name, qty, cost, price, value, P&L%, weight (mini bar; cost/price/value carry currency units) | Count · as-of                    |
+| debrief_transactions                        | Trades          | N trades                                              | Table: time, side, symbol, name, qty, price, amount, status                                                  | Empty state                      |
+| debrief_watchlist                           | Watchlist       | N watched                                             | Table: symbol, name, price, chg%, target, distance, alert (price/target carry currency units)                | Add guidance                     |
+| debrief_report                              | Report          | Market badge + title + generated-at                   | Summary + SVG line chart + metrics                                                                           | Expand/collapse full text        |
+| debrief_memory                              | Memory evidence | Layer badge (long/short) + topic + confidence + range | Summary + expandable evidence (`[[cite:doc:id]]`)                                                            | Empty state                      |
+| debrief_analyze                             | Analysis job    | jobId + status dot + preparedAt                       | Quotes / news / memory candidates sections                                                                   | Guidance hint                    |
+| debrief_jobs                                | Job ledger      | N entries                                             | Timeline (status dots; failures show error code)                                                             | Ledger note                      |
+| debrief_dashboard                           | Dashboard       | Last N days                                           | KPIs + equity/returns charts + donut + tables                                                                | Add guidance                     |
+| debrief_news                                | News            | N items · updated-at                                  | Timeline (title/time/source; items link to the source URL)                                                   | Empty state                      |
+| debrief_report_create / compact_write / add | Write result    | Report written / Memory compacted / Memory added      | ID (+version/status)                                                                                         | Audit note (kernel user_actions) |
 
 ## Fallback paths (never crash the slot)
 
@@ -133,14 +138,24 @@
 
 ## Portfolio page layout (top to bottom)
 
-1. Title + range chips (30/90/200 days, 1 year); switching redraws both lines.
-2. KPI row (4 cells): total assets / day return / total return / annualized.
-3. Equity area chart (spans 2 columns).
-4. Returns line (dashed zero baseline, end value in up/down color).
+1. Title + range chips (30/90/200 days, 1 year) + display-currency chips (CNY /
+   USD / HKD, shown when FX is available); switching redraws both lines and
+   converts the KPIs.
+2. KPI row (4 cells): total assets / day return / total return / annualized —
+   monetary values convert with the display currency; an FX note below
+   (1 CNY ≈ X CCY · updated time).
+3. Equity area chart (spans 2 columns, converted with the display currency).
+4. Returns line (dashed zero baseline, end value in up/down color; percent
+   values are never converted).
 5. Composition donut (stroke-dasharray segments + legend; center = holdings count).
-6. Holdings table (header “+ Add holding”, v2 placeholder).
-7. Watchlist table (header “+ Add watch”, v2 placeholder).
+6. Holdings table (header “+ Add holding”; cost/price/value carry currency
+   units: CN stocks and funds CNY, US and crypto USD, HK HKD).
+7. Watchlist table (header “+ Add watch”; price/target carry currency units).
 8. Footer note: add entries arrive in v2 through the DSH confirmation flow.
+
+FX source: the `fx` block inside the dashboard payload (open.er-api.com, free,
+seconds of latency accepted); on provider failure `fx` is null, the page hides
+the currency chips and shows CNY only.
 
 ## v2 editing (Portfolio page)
 

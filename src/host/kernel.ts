@@ -96,14 +96,30 @@ export function managedDbUrl(dataDir: string): string {
  * Subprocess environment for one kernel call: managed mode injects
  * `DATABASE_URL=sqlite:///<dataDir>/portfolio.db` unless the user already
  * configured one; external mode passes the environment through untouched.
+ * Non-empty `telegram` credentials are additionally overlaid as
+ * `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (existing env values are never
+ * wiped when the config omits or empties a value).
  */
 export function resolveKernelEnv(
   kernel: Pick<EnsureResult, 'mode' | 'dbUrl'>,
   env: Record<string, string | undefined>,
+  telegram?: { botToken?: string; chatId?: string },
 ): Record<string, string | undefined> {
-  if (kernel.mode !== 'managed' || kernel.dbUrl === undefined) return { ...env }
-  if (env.DATABASE_URL !== undefined && env.DATABASE_URL !== '') return { ...env }
-  return { ...env, DATABASE_URL: kernel.dbUrl }
+  let resolved = { ...env }
+  if (
+    kernel.mode === 'managed' &&
+    kernel.dbUrl !== undefined &&
+    (env.DATABASE_URL === undefined || env.DATABASE_URL === '')
+  ) {
+    resolved = { ...resolved, DATABASE_URL: kernel.dbUrl }
+  }
+  if (telegram?.botToken !== undefined && telegram.botToken !== '') {
+    resolved = { ...resolved, TELEGRAM_BOT_TOKEN: telegram.botToken }
+  }
+  if (telegram?.chatId !== undefined && telegram.chatId !== '') {
+    resolved = { ...resolved, TELEGRAM_CHAT_ID: telegram.chatId }
+  }
+  return resolved
 }
 
 const venvBin = (dataDir: string): string => join(dataDir, 'venv', process.platform === 'win32' ? 'Scripts' : 'bin')

@@ -11,6 +11,7 @@ export default [
       'schedule/**',
       'docs/**',
       'examples/**',
+      'kernel/.venv-dev/**',
       '.github/**',
     ],
   },

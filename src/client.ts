@@ -129,6 +129,9 @@ export const zh = {
   'page.addWatch': '+ 添加自选',
   'page.addComing': '添加持仓 / 自选将在 v2 提供（走 DSH 确认流）',
   'page.refreshed': '更新于 {time}',
+  'page.currency': '显示币种',
+  'page.fxRate': '1 CNY ≈ {rate} {ccy} · 汇率更新 {time}',
+  'page.fxMissing': '汇率暂不可用，仅按人民币显示',
   'page.kpiTotalAssets': '总资产',
   'page.kpiDayPnl': '今日收益',
   'page.kpiTotalPnl': '总收益',
@@ -308,6 +311,9 @@ export const en: Record<keyof typeof zh, string> = {
   'page.addWatch': '+ Add watch',
   'page.addComing': 'Adding holdings / watchlist arrives in v2 (DSH confirmation flow)',
   'page.refreshed': 'Updated {time}',
+  'page.currency': 'Display currency',
+  'page.fxRate': '1 CNY ≈ {rate} {ccy} · FX updated {time}',
+  'page.fxMissing': 'FX unavailable, showing CNY only',
   'page.kpiTotalAssets': 'Total assets',
   'page.kpiDayPnl': 'Day return',
   'page.kpiTotalPnl': 'Total return',
@@ -564,6 +570,7 @@ const POSITION_ROW = {
   marketValue: opt(num()),
   pnlPct: opt(num()),
   weight: opt(num()),
+  currency: opt(s()),
 }
 
 const WATCH_ROW = {
@@ -575,6 +582,7 @@ const WATCH_ROW = {
   targetPrice: opt(num()),
   distancePct: opt(num()),
   alert: opt({ type: 'boolean' }),
+  currency: opt(s()),
 }
 
 export function renderModel(kind: string, data: unknown): RenderModel {
@@ -617,6 +625,9 @@ export function renderModel(kind: string, data: unknown): RenderModel {
           composition: opt(arr(obj({ name: opt(s()), value: opt(num()) }))),
           holdings: opt(arr(obj(POSITION_ROW))),
           watchlist: opt(arr(obj(WATCH_ROW))),
+          fx: opt(obj({ base: opt(s()), asOf: opt(s()), rates: opt(obj({})), source: opt(s()) })),
+          pricesRefreshed: opt({ type: 'boolean' }),
+          priceErrors: opt(arr(s())),
         }),
         data,
       )
@@ -901,8 +912,17 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
     return (value > 0 ? '+' : '') + value.toFixed(2) + '%'
   }
 
-  function money(n: unknown): string {
-    return '¥' + Math.round(Number(n) || 0).toLocaleString('zh-CN')
+  const MONEY_SYMBOLS: Record<string, string> = { CNY: '¥', USD: '$', HKD: 'HK$' }
+  const CURRENCIES = ['CNY', 'USD', 'HKD']
+
+  function money(n: unknown, ccy = 'CNY'): string {
+    return (MONEY_SYMBOLS[ccy] ?? '¥') + Math.round(Number(n) || 0).toLocaleString('zh-CN')
+  }
+
+  /** Inline per-row currency suffix, e.g. `' USD'`, from the kernel `currency` field. */
+  function unit(row: unknown): string {
+    const c = (row as Record<string, unknown>)?.currency
+    return typeof c === 'string' && c !== '' ? ' ' + c : ''
   }
 
   function updown(v: unknown): string {
@@ -1309,9 +1329,9 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                 h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))),
                 h('td', null, String(p.name ?? '')),
                 h('td', null, fmt(p.quantity, 4)),
-                h('td', null, fmt(p.cost)),
-                h('td', null, fmt(p.price)),
-                h('td', null, fmt(p.marketValue, 0)),
+                h('td', null, fmt(p.cost) + unit(p)),
+                h('td', null, fmt(p.price) + unit(p)),
+                h('td', null, fmt(p.marketValue, 0) + unit(p)),
                 h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)),
                 h(
                   'td',
@@ -1474,9 +1494,9 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                 { key: String(w.symbol ?? '') },
                 h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))),
                 h('td', null, String(w.name ?? '')),
-                h('td', null, fmt(w.price)),
+                h('td', null, fmt(w.price) + unit(w)),
                 h('td', { className: updown(w.changePct) }, pct(w.changePct)),
-                h('td', null, fmt(w.targetPrice)),
+                h('td', null, fmt(w.targetPrice) + unit(w)),
                 h('td', { className: updown(w.distancePct) }, pct(w.distancePct)),
                 h(
                   'td',
@@ -1826,7 +1846,7 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
         icon: ICONS.news,
         title: t('news.title'),
         tool: 'debrief_news',
-        meta: t('news.count', { count: items.length, fetchedAt: String(record.fetchedAt ?? '') }),
+        meta: t('news.count', { count: items.length, fetchedAt: String(record.fetchedAt ?? record.asOf ?? '') }),
       },
       h(
         'div',
@@ -1834,11 +1854,15 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
         items.map((n, index) =>
           h(
             'div',
-            { className: 'dbr-tl-item', key: `${String(n.title ?? '')}${index}` },
+            { className: 'dbr-tl-item', key: `${String(n.title ?? n.headline ?? '')}${index}` },
             h('span', { className: 'dbr-dot ok' }),
-            h('span', { className: 'dbr-tl-title' }, String(n.title ?? '')),
-            h('span', { className: 'dbr-tl-time' }, String(n.at ?? '')),
-            h('span', { className: 'dbr-tl-sub' }, `${marketName(t, n.market)} · ${String(n.source ?? '')}`),
+            h('span', { className: 'dbr-tl-title' }, String(n.title ?? n.headline ?? '')),
+            h('span', { className: 'dbr-tl-time' }, String(n.publishedAt ?? n.at ?? '')),
+            h(
+              'span',
+              { className: 'dbr-tl-sub' },
+              [marketName(t, n.market), String(n.source ?? '')].filter((segment) => segment !== '').join(' · '),
+            ),
           ),
         ),
       ),
@@ -2047,8 +2071,8 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                       { key: String(p.symbol ?? '') },
                       h('td', null, String(p.symbol ?? '')),
                       h('td', null, String(p.name ?? '')),
-                      h('td', null, fmt(p.price)),
-                      h('td', null, fmt(p.marketValue, 0)),
+                      h('td', null, fmt(p.price) + unit(p)),
+                      h('td', null, fmt(p.marketValue, 0) + unit(p)),
                       h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)),
                       h('td', null, `${Number(p.weight ?? 0)}%`),
                     ),
@@ -2091,8 +2115,8 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                       { key: String(w.symbol ?? '') },
                       h('td', null, String(w.symbol ?? '')),
                       h('td', null, String(w.name ?? '')),
-                      h('td', null, fmt(w.price)),
-                      h('td', null, fmt(w.targetPrice)),
+                      h('td', null, fmt(w.price) + unit(w)),
+                      h('td', null, fmt(w.targetPrice) + unit(w)),
                       h(
                         'td',
                         null,
@@ -2600,6 +2624,7 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
   function DashboardPage(props: { t?: Translate }): unknown {
     const t = pickT(props.t)
     const [range, setRange] = React.useState<string>('90')
+    const [ccy, setCcy] = React.useState<string>('CNY')
     const [state, setState] = React.useState<PageState>({ status: 'loading', data: null, error: null })
     const [attempt, setAttempt] = React.useState(0)
     const [modal, setModal] = React.useState<ModalState | null>(null)
@@ -2662,6 +2687,25 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
     const holdings = toArray(record?.holdings)
     const watchlist = toArray(record?.watchlist)
 
+    const fx = (record?.fx ?? null) as {
+      base?: string
+      asOf?: string
+      rates?: Record<string, unknown>
+      source?: string
+    } | null
+    const rates = fx?.rates ?? {}
+    const rawFactor = ccy === 'CNY' ? 1 : Number(rates[ccy])
+    const fxOk = Number.isFinite(rawFactor) && rawFactor > 0
+    const factor = fxOk ? rawFactor : 1
+    const activeCcy = fxOk ? ccy : 'CNY'
+    const fxTime = (() => {
+      const asOf = fx?.asOf
+      const parsed = typeof asOf === 'string' ? new Date(asOf) : null
+      return parsed !== null && !Number.isNaN(parsed.getTime())
+        ? parsed.toLocaleTimeString('zh-CN')
+        : new Date().toLocaleTimeString('zh-CN')
+    })()
+
     return h(
       'div',
       { className: 'dbr-page' },
@@ -2683,6 +2727,23 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                 onClick: () => setRange(value),
               },
               rangeLabel(t, value),
+            ),
+          ),
+        ),
+        h(
+          'div',
+          { className: 'dbr-chips', role: 'group', 'aria-label': t('page.currency') },
+          CURRENCIES.filter((value) => value === 'CNY' || rates[value] !== undefined).map((value) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                key: value,
+                className: 'dbr-chip' + (value === activeCcy ? ' active' : ''),
+                'aria-pressed': value === activeCcy,
+                onClick: () => setCcy(value),
+              },
+              value,
             ),
           ),
         ),
@@ -2724,20 +2785,27 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                     className: 'wide dbr-stats',
                     style: { marginBottom: 0, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' },
                   },
-                  h(Stat, { k: t('page.kpiTotalAssets'), v: money(kpis.totalAssets) }),
+                  h(Stat, { k: t('page.kpiTotalAssets'), v: money(Number(kpis.totalAssets) * factor, activeCcy) }),
                   h(Stat, {
                     k: t('page.kpiDayPnl'),
-                    v: money(kpis.dayPnl),
+                    v: money(Number(kpis.dayPnl) * factor, activeCcy),
                     d: pct(kpis.dayPnlPct),
                     cls: updown(kpis.dayPnlPct),
                   }),
                   h(Stat, {
                     k: t('page.kpiTotalPnl'),
-                    v: money(kpis.totalPnl),
+                    v: money(Number(kpis.totalPnl) * factor, activeCcy),
                     d: pct(kpis.totalPnlPct),
                     cls: updown(kpis.totalPnlPct),
                   }),
                   h(Stat, { k: t('page.kpiAnnual'), v: pct(kpis.annualPct) }),
+                ),
+                h(
+                  'div',
+                  { className: 'wide dbr-hint', style: { textAlign: 'right' } },
+                  fx !== null && fxOk
+                    ? t('page.fxRate', { rate: fmt(factor, 4), ccy: activeCcy, time: fxTime })
+                    : t('page.fxMissing'),
                 ),
                 h(
                   'div',
@@ -2756,8 +2824,8 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                     ? h(LazyChart, {
                         t,
                         title: t('dashboard.equity'),
-                        points: equity,
-                        fmtLabel: (v: number) => money(v),
+                        points: equity.map((v: number) => v * factor),
+                        fmtLabel: (v: number) => money(v, activeCcy),
                       })
                     : null,
                 ),
@@ -2849,9 +2917,9 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                                 ),
                                 h('td', null, String(p.name ?? '')),
                                 h('td', null, fmt(p.quantity, 4)),
-                                h('td', null, fmt(p.cost)),
-                                h('td', null, fmt(p.price)),
-                                h('td', null, fmt(p.marketValue, 0)),
+                                h('td', null, fmt(p.cost) + unit(p)),
+                                h('td', null, fmt(p.price) + unit(p)),
+                                h('td', null, fmt(p.marketValue, 0) + unit(p)),
                                 h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)),
                                 h('td', null, `${Number(p.weight ?? 0)}%`),
                                 h(
@@ -2941,9 +3009,9 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                                   h('span', { className: 'dbr-sub' }, marketName(t, w.market)),
                                 ),
                                 h('td', null, String(w.name ?? '')),
-                                h('td', null, fmt(w.price)),
+                                h('td', null, fmt(w.price) + unit(w)),
                                 h('td', { className: updown(w.changePct) }, pct(w.changePct)),
-                                h('td', null, fmt(w.targetPrice)),
+                                h('td', null, fmt(w.targetPrice) + unit(w)),
                                 h('td', { className: updown(w.distancePct) }, pct(w.distancePct)),
                                 h(
                                   'td',

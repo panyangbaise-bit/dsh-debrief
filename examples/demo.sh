@@ -28,9 +28,15 @@ run memory search --query 建仓理由
 run analysis prepare --market us
 run job list
 
-section '只读 Read: dashboard / news'
+section '只读 Read: dashboard / news / fx'
 run dashboard --range 90
 run news latest --limit 3
+run news latest --no-refresh --limit 3
+run fx
+run fx --base USD
+
+section 'Telegram 通知 Notify: status（test 需要真实 token/chat，跳过）'
+run notify status
 
 section '白名单写 Write: report create (stdin JSON)'
 printf '{"market":"us","title":"盘后分析 · demo","summary":"一句话总结","jobId":"debrief-job-2048"}' |

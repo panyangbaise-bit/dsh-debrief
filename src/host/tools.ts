@@ -1,8 +1,9 @@
 /**
  * Registry-ready tool definitions in the compiled raw-schema form, mirroring
- * what `defineTool` produces for the same author input. Nine read tools
- * (including the dashboard aggregate and the news feed) plus three whitelisted
- * write tools used by the scheduled debrief skills.
+ * what `defineTool` produces for the same author input. Eleven read tools
+ * (including the dashboard aggregate, the news feed, and the Telegram notify
+ * bridge) plus three whitelisted write tools used by the scheduled debrief
+ * skills.
  */
 import { runCli, type Envelope } from './cli.js'
 import type { ContentBlock, JsonNode, ToolDefinition, ToolRunContext } from './types.js'
@@ -199,16 +200,42 @@ export function validateWritePayload(
 
 // ---- definitions -------------------------------------------------------------
 
+/** debrief_news CLI argument vector (exported for the test suite). */
+export function newsArgs(args: Record<string, unknown>): readonly string[] {
+  return [
+    'latest',
+    ...(args.limit ? ['--limit', String(args.limit)] : []),
+    ...(args.refresh === false ? ['--no-refresh'] : []),
+    ...(args.notify === true ? ['--notify'] : []),
+  ]
+}
+
+/** debrief_telegram CLI argument vector (exported for the test suite). */
+export function telegramArgs(args: Record<string, unknown>): readonly string[] {
+  return [String(args.action)]
+}
+
+/** `--refresh` suffix shared by the quote-backed read commands (exported for tests). */
+export function refreshArgs(args: Record<string, unknown>): readonly string[] {
+  return args.refresh === true ? ['--refresh'] : []
+}
+
+const REFRESH_NOTE =
+  'When true, force-refresh quotes for every row right now (slow). When omitted, stale quotes refresh automatically.'
+
 export function defineTools(config: DebriefConfig): ToolDefinition[] {
   return [
     tool(config, {
       name: 'debrief_holdings',
       description:
         'Read the current portfolio holdings: symbol, name, quantity, cost, last price, market value, unrealized PnL, and weight.',
-      parameters: { status: sProp("Only open positions when 'open'; all positions when omitted.") },
+      parameters: {
+        status: sProp("Only open positions when 'open'; all positions when omitted."),
+        refresh: bProp(REFRESH_NOTE),
+      },
       required: [],
       command: ['holdings'],
-      argsOf: (a) => (a.status ? ['--status', String(a.status)] : []),
+      argsOf: (a) => [...(a.status ? ['--status', String(a.status)] : []), ...refreshArgs(a)],
     }),
     tool(config, {
       name: 'debrief_transactions',
@@ -230,9 +257,10 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
       name: 'debrief_watchlist',
       description:
         'Read the watchlist: instruments under observation with target price, distance to target, and alert state.',
-      parameters: {},
+      parameters: { refresh: bProp(REFRESH_NOTE) },
       required: [],
       command: ['watchlist'],
+      argsOf: refreshArgs,
     }),
     tool(config, {
       name: 'debrief_instruments',
@@ -278,10 +306,10 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
       name: 'debrief_analyze',
       description:
         'Prepare an after-market analysis input package for one market: recent quotes, news, and candidate memory evidence. Synthesize the conclusion yourself from the package, then present it; the package is bounded and ready to read.',
-      parameters: { market: sProp('One of: us, cn, hk, crypto.') },
+      parameters: { market: sProp('One of: us, cn, hk, crypto.'), refresh: bProp(REFRESH_NOTE) },
       required: ['market'],
       command: ['analysis'],
-      argsOf: (a) => ['prepare', '--market', String(a.market)],
+      argsOf: (a) => ['prepare', '--market', String(a.market), ...refreshArgs(a)],
     }),
     tool(config, {
       name: 'debrief_jobs',
@@ -296,26 +324,40 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
       name: 'debrief_dashboard',
       description:
         'Read the dashboard aggregate: KPIs (total assets, daily and total return), equity and cumulative-return series, portfolio composition, holdings, and watchlist in one payload.',
-      parameters: { range: sProp('Series length in days: 30, 90, 200, or 365. Default 90.') },
+      parameters: {
+        range: sProp('Series length in days: 30, 90, 200, or 365. Default 90.'),
+        refresh: bProp(REFRESH_NOTE),
+      },
       required: [],
       command: ['dashboard'],
-      argsOf: (a) => (a.range ? ['--range', String(a.range)] : []),
+      argsOf: (a) => [...(a.range ? ['--range', String(a.range)] : []), ...refreshArgs(a)],
     }),
     tool(config, {
       name: 'debrief_news',
       description:
-        'Read the latest collected market news feed (raw fetches by the kernel scheduler, no summaries): title, source, published time, and optional market filter.',
+        'Read the latest news feed: live-fetch (with persistence) on each call, or read the last collected batch with refresh=false. Returns title, source, published time, summary and URL; filter for relevance yourself.',
       parameters: {
-        market: sProp('Optional market filter: us, cn, hk, crypto. All markets when omitted.'),
         limit: iProp('Maximum items. Default 20, max 100.'),
+        refresh: bProp('When false, skip the live fetch and read the last collected batch only. Default true.'),
+        notify: bProp(
+          'When true, newly fetched items are also pushed to Telegram (requires Telegram config). Default false.',
+        ),
       },
       required: [],
       command: ['news'],
-      argsOf: (a) => [
-        'latest',
-        ...(a.market ? ['--market', String(a.market)] : []),
-        ...(a.limit ? ['--limit', String(a.limit)] : []),
-      ],
+      argsOf: newsArgs,
+    }),
+    tool(config, {
+      name: 'debrief_telegram',
+      description: 'Check or test the Telegram bot notification channel used for debrief reports and news pushes.',
+      parameters: {
+        action: sProp(
+          '"test" sends a test message to the configured bot; "status" reports whether Telegram is configured (token is masked).',
+        ),
+      },
+      required: ['action'],
+      command: ['notify'],
+      argsOf: telegramArgs,
     }),
     tool(config, {
       name: 'debrief_report_create',

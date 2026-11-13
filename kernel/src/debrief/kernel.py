@@ -8,6 +8,7 @@ from typing import Optional
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from adapters.fx import get_rates
 from db.models import Holding, PriceCache, Transaction, WatchlistItem
 from debrief.context import display_now, market_to_output
 from debrief.errors import KernelError
@@ -17,6 +18,37 @@ from domain.valuation import calculate_portfolio_totals
 # Env overrides make CNY conversion deterministic/offline-friendly:
 #   DEBRIEF_FX_USD=7.2 DEBRIEF_FX_HKD=0.92
 FX_ENV_PREFIX = "DEBRIEF_FX_"
+
+
+def _refresh_result(session, targets, force: bool):
+    """Run refresh_stale_prices defensively; never raise out of a read.
+
+    debrief.worker imports apscheduler at module level; in a wheel-only
+    (collector-free) install that import fails, so it must live inside the
+    guarded block — reads degrade to cached prices instead of erroring.
+    """
+    try:
+        from debrief.worker import refresh_stale_prices
+
+        return refresh_stale_prices(session, targets, force=force)
+    except Exception as exc:  # pragma: no cover — defensive
+        return {
+            "refreshed": 0,
+            "failed": [f"refresh:{type(exc).__name__}"],
+            "available": False,
+        }
+
+
+def _refresh_meta(refresh, session, targets) -> dict:
+    """Top-level refresh metadata: pricesRefreshed + capped priceErrors."""
+    if refresh is False:
+        return {"pricesRefreshed": False}
+    result = _refresh_result(session, targets, force=bool(refresh))
+    meta = {"pricesRefreshed": bool(result and result.get("available"))}
+    errors = (result or {}).get("failed") or []
+    if errors:
+        meta["priceErrors"] = errors[:10]
+    return meta
 
 
 def cny_rates(markets: list[str]) -> dict[str, float]:
@@ -72,8 +104,15 @@ def _open_holdings(session: Session, status: Optional[str]) -> list[Holding]:
     return session.query(Holding).filter(Holding.status == "open").all()
 
 
-def build_holdings_payload(session: Session, status: Optional[str] = None) -> dict:
+def build_holdings_payload(
+    session: Session, status: Optional[str] = None, *, refresh: Optional[bool] = None
+) -> dict:
     holdings = _open_holdings(session, status)
+    refresh_meta = _refresh_meta(
+        refresh,
+        session,
+        {(h.market.upper(), h.ticker.upper()) for h in holdings},
+    )
     if not holdings:
         return {
             "asOf": display_now(),
@@ -84,6 +123,7 @@ def build_holdings_payload(session: Session, status: Optional[str] = None) -> di
             "totalPnl": 0.0,
             "totalPnlPct": 0.0,
             "positions": [],
+            **refresh_meta,
         }
     markets = {h.market for h in holdings}
     rates = cny_rates(list(markets))
@@ -111,6 +151,7 @@ def build_holdings_payload(session: Session, status: Optional[str] = None) -> di
                 "marketValue": market_value,
                 "pnlPct": pnl_pct,
                 "weight": 0.0,  # filled below
+                "currency": currency_for_market(market_db),
             }
         )
 
@@ -145,6 +186,7 @@ def build_holdings_payload(session: Session, status: Optional[str] = None) -> di
         "totalPnl": total_pnl,
         "totalPnlPct": total_pnl_pct,
         "positions": positions,
+        **refresh_meta,
     }
 
 
@@ -182,11 +224,18 @@ def build_transactions_payload(
     return {"total": total, "limit": limit, "offset": offset, "items": items}
 
 
-def build_watchlist_payload(session: Session, ticker: Optional[str] = None) -> dict:
+def build_watchlist_payload(
+    session: Session, ticker: Optional[str] = None, *, refresh: Optional[bool] = None
+) -> dict:
     query = session.query(WatchlistItem).filter(WatchlistItem.status != "archived")
     if ticker:
         query = query.filter(WatchlistItem.ticker == ticker.upper())
     rows = query.order_by(desc(WatchlistItem.priority), desc(WatchlistItem.created_at)).all()
+    refresh_meta = _refresh_meta(
+        refresh,
+        session,
+        {(item.market.upper(), item.ticker.upper()) for item in rows},
+    )
     items = []
     for item in rows:
         market_db = item.market.upper()
@@ -216,9 +265,10 @@ def build_watchlist_payload(session: Session, ticker: Optional[str] = None) -> d
                 "targetPrice": float(target) if target is not None else None,
                 "distancePct": distance,
                 "alert": alert,
+                "currency": currency_for_market(market_db),
             }
         )
-    return {"count": len(items), "items": items}
+    return {"count": len(items), "items": items, **refresh_meta}
 
 
 def _fmt_time(dt) -> str:
@@ -229,11 +279,30 @@ def _fmt_time(dt) -> str:
     return format_display_time(dt, fmt="%Y-%m-%d %H:%M")
 
 
-def build_dashboard_payload(session: Session, range_days: int) -> dict:
-    holdings_payload = build_holdings_payload(session, status="open")
-    watchlist_payload = build_watchlist_payload(session)
+def build_dashboard_payload(
+    session: Session, range_days: int, *, refresh: Optional[bool] = None
+) -> dict:
+    # Inner builders skip their own refresh — the dashboard refreshes the
+    # union of holdings + watchlist exactly once and reports it at top level.
+    holdings_payload = build_holdings_payload(session, status="open", refresh=False)
+    watchlist_payload = build_watchlist_payload(session, refresh=False)
     open_holdings = session.query(Holding).filter(Holding.status == "open").all()
     rates = cny_rates(list({h.market for h in open_holdings}) or ["CN"])
+
+    refresh_targets = {(h.market.upper(), h.ticker.upper()) for h in open_holdings}
+    refresh_targets |= {
+        (item.market.upper(), item.ticker.upper())
+        for item in session.query(WatchlistItem)
+        .filter(WatchlistItem.status != "archived")
+        .all()
+    }
+    refresh_meta = _refresh_meta(refresh, session, refresh_targets)
+
+    fx = None
+    try:
+        fx = get_rates("CNY")
+    except Exception:
+        fx = None
 
     # Equity series from daily price_cache snapshots (carry-forward per ticker).
     start_date = (datetime.now(timezone.utc) - timedelta(days=range_days)).date()
@@ -310,4 +379,6 @@ def build_dashboard_payload(session: Session, range_days: int) -> dict:
         "composition": composition,
         "holdings": holdings_payload["positions"],
         "watchlist": watchlist_payload["items"],
+        "fx": fx,
+        **refresh_meta,
     }

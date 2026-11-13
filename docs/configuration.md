@@ -14,6 +14,9 @@
     timeoutMs: 15000
     enableSetup: true
     enableDashboardRoute: true
+    telegram:
+      botToken: '123456:ABC…' # 可选；Telegram Bot token
+      chatId: '-100…' # 可选；接收推送的 chat id
 ```
 
 | 配置项                 | 类型                      | 默认                     | 说明                                                                                                                                     |
@@ -21,16 +24,18 @@
 | `cliPath`              | string                    | 未设置                   | 内核 CLI 的绝对路径或 PATH 名（external 模式；auto 模式的优先选择）。指向 `mock/debrief.js` 即可本地演示。                               |
 | `kernelMode`           | `auto\|external\|managed` | `auto`                   | `auto`：显式 cliPath/`DEBRIEF_CLI_PATH` 优先 external，否则自举；`external`：始终用 cliPath（服务器部署）；`managed`：始终自举内置内核。 |
 | `dataDir`              | string                    | `~/.dsh/debrief-runtime` | 自举 venv 与 marker 的运行时目录（managed 模式）；环境变量 `DEBRIEF_DATA_DIR` 兜底。                                                     |
-| `withCollectors`       | boolean                   | `false`                  | 自举完成后额外从 PyPI 联网安装 `portfolio_agent_kernel[collectors]`（采集依赖，可选；失败不阻断核心读写）。                              |
+| `withCollectors`       | boolean                   | `false`                  | 自举完成后额外从 PyPI 联网安装 `portfolio_agent_kernel[collectors]`（采集依赖，可选；失败不阻断核心读写；实时行情刷新需要它）。          |
 | `timeoutMs`            | number                    | `15000`                  | 单次内核调用超时（毫秒），超时返回 `DEBRIEF_TIMEOUT`。                                                                                   |
 | `enableSetup`          | boolean                   | `true`                   | 是否注册 `debrief-setup` 人类命令（幂等注册 8 个定时任务）。                                                                             |
 | `enableDashboardRoute` | boolean                   | `true`                   | 是否注册只读路由 `/api/debrief/dashboard?range=30\|90\|200\|365`（经 DSH 认证的 connection fetch 通道，仅 owner cookie 可达）。          |
+| `telegram.botToken`    | string                    | 未设置                   | Telegram Bot token；与 chatId 同时设置即启用推送（复盘发布、新闻新增、提醒比对、`notify test`）。注入为内核 `TELEGRAM_BOT_TOKEN`。       |
+| `telegram.chatId`      | string                    | 未设置                   | 接收推送的 chat id（私聊数字 id 或频道 `@channel`）；注入为内核 `TELEGRAM_CHAT_ID`。                                                     |
 
 未在 schema 内的字段会被忽略。插件不持久化配置：修改 profile patch 由用户自行编辑。
 
 ## 内核模式与自举（managed）
 
-插件 npm 包内置 `kernel/wheels/`（slim 内核轮子 + 8 个纯 Python 离线依赖轮子，
+插件 npm 包内置 `kernel/wheels/`（内核 wheel（纯 Python）+ 8 个纯 Python 离线依赖轮子，
 约 2.6MB）。首次调用内核时：
 
 1. 探测工具：优先 `uv`（PATH 可执行），否则 `python3.11|python3.12|python3.13`
@@ -46,11 +51,28 @@
 
 ## 环境变量
 
-| 变量                 | 说明                                            |
-| -------------------- | ----------------------------------------------- |
-| `DEBRIEF_CLI_PATH`   | `cliPath` 的兜底来源（auto 模式视为显式配置）。 |
-| `DEBRIEF_DATA_DIR`   | `dataDir` 的兜底来源。                          |
-| `DEBRIEF_WHEELS_DIR` | 轮子目录覆盖（测试用，一般不需要）。            |
+| 变量                   | 说明                                                               |
+| ---------------------- | ------------------------------------------------------------------ |
+| `DEBRIEF_CLI_PATH`     | `cliPath` 的兜底来源（auto 模式视为显式配置）。                    |
+| `DEBRIEF_DATA_DIR`     | `dataDir` 的兜底来源。                                             |
+| `DEBRIEF_WHEELS_DIR`   | 轮子目录覆盖（测试用，一般不需要）。                               |
+| `TELEGRAM_BOT_TOKEN`   | 内核侧 Telegram token（插件 `telegram.botToken` 会注入覆盖）。     |
+| `TELEGRAM_CHAT_ID`     | 内核侧 Telegram chat id（插件 `telegram.chatId` 会注入覆盖）。     |
+| `TELEGRAM_NEWS_PUSH`   | `false` 关闭新闻新增推送（默认开启，且仅在已配置时生效）。         |
+| `TELEGRAM_REPORT_PUSH` | `false` 关闭复盘报告推送（默认开启，且仅在已配置时生效）。         |
+| `PRICE_STALE_SECONDS`  | 行情缓存视为过期的秒数（默认 120）；读侧超过此时长即实时刷新。     |
+| `DEBRIEF_FX_<CCY>`     | 汇率离线兜底：每 1 CNY 兑换多少 `CCY`（如 `DEBRIEF_FX_USD=7.2`）。 |
+
+## 实时行情 / 汇率 / Telegram
+
+- **实时行情**：`holdings` / `watchlist` / `dashboard` / `analysis prepare` 默认在
+  行情超过 `PRICE_STALE_SECONDS` 秒时自动实时刷新（`--refresh` 强制全部刷新、
+  `--no-refresh` 只读缓存）；未安装 collectors 时静默降级为缓存数据。
+- **汇率**：dashboard 附 `fx` 块（免费接口 open.er-api.com，无需密钥，可接受秒级
+  延迟），投资组合页面据此提供 CNY/USD/HKD 总资产切换；接口失败时仅按 CNY 展示。
+- **Telegram**：仅发不收（send-only）。新闻由内核 worker 采集后推送；复盘报告由
+  `report create` 写回时推送；可用 `debrief notify status` 查看状态、`notify test`
+  发送测试消息（未配置返回 `DEBRIEF_TELEGRAM_UNCONFIGURED`）。
 
 ## UI 相关说明
 
@@ -70,26 +92,53 @@ The plugin is configured in the profile patch layer (the `- id: debrief` row of
     timeoutMs: 15000
     enableSetup: true
     enableDashboardRoute: true
+    telegram:
+      botToken: '123456:ABC…' # optional: Telegram Bot token
+      chatId: '-100…' # optional: chat id to receive pushes
 ```
 
-| Field                  | Type                      | Default                  | Description                                                                                                                                            |
-| ---------------------- | ------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cliPath`              | string                    | unset                    | Absolute path or PATH name of the kernel CLI (external mode; the auto mode's first choice). Point it at `mock/debrief.js` for a local demo.            |
-| `kernelMode`           | `auto\|external\|managed` | `auto`                   | `auto`: an explicit cliPath/`DEBRIEF_CLI_PATH` prefers external, else bootstrap; `external`: always use cliPath (server); `managed`: always bootstrap. |
-| `dataDir`              | string                    | `~/.dsh/debrief-runtime` | Runtime directory for the bootstrapped venv and marker (managed mode); env `DEBRIEF_DATA_DIR` falls back.                                              |
-| `withCollectors`       | boolean                   | `false`                  | After bootstrap, additionally install `portfolio_agent_kernel[collectors]` from PyPI (networked, optional; failures don't block core commands).        |
-| `timeoutMs`            | number                    | `15000`                  | Per-call kernel timeout in ms; expiry returns `DEBRIEF_TIMEOUT`.                                                                                       |
-| `enableSetup`          | boolean                   | `true`                   | Register the `debrief-setup` human command (idempotently registers 8 scheduled tasks).                                                                 |
-| `enableDashboardRoute` | boolean                   | `true`                   | Serve the read-only route `/api/debrief/dashboard?range=30\|90\|200\|365` through the DSH-authenticated connection fetch channel (owner cookie only).  |
+| Field                  | Type                      | Default                  | Description                                                                                                                                                                     |
+| ---------------------- | ------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cliPath`              | string                    | unset                    | Absolute path or PATH name of the kernel CLI (external mode; the auto mode's first choice). Point it at `mock/debrief.js` for a local demo.                                     |
+| `kernelMode`           | `auto\|external\|managed` | `auto`                   | `auto`: an explicit cliPath/`DEBRIEF_CLI_PATH` prefers external, else bootstrap; `external`: always use cliPath (server); `managed`: always bootstrap.                          |
+| `dataDir`              | string                    | `~/.dsh/debrief-runtime` | Runtime directory for the bootstrapped venv and marker (managed mode); env `DEBRIEF_DATA_DIR` falls back.                                                                       |
+| `withCollectors`       | boolean                   | `false`                  | After bootstrap, additionally install `portfolio_agent_kernel[collectors]` from PyPI (networked, optional; failures don't block core commands; live quote refresh needs it).    |
+| `timeoutMs`            | number                    | `15000`                  | Per-call kernel timeout in ms; expiry returns `DEBRIEF_TIMEOUT`.                                                                                                                |
+| `enableSetup`          | boolean                   | `true`                   | Register the `debrief-setup` human command (idempotently registers 8 scheduled tasks).                                                                                          |
+| `enableDashboardRoute` | boolean                   | `true`                   | Serve the read-only route `/api/debrief/dashboard?range=30\|90\|200\|365` through the DSH-authenticated connection fetch channel (owner cookie only).                           |
+| `telegram.botToken`    | string                    | unset                    | Telegram Bot token; set together with chatId to enable pushes (published reports, new news items, watchlist reminders, `notify test`). Injected as kernel `TELEGRAM_BOT_TOKEN`. |
+| `telegram.chatId`      | string                    | unset                    | Chat id that receives pushes (numeric private id or `@channel`); injected as kernel `TELEGRAM_CHAT_ID`.                                                                         |
 
 Unknown fields are ignored. The plugin never persists configuration; the profile
 patch belongs to the user.
 
 ## Environment
 
-| Variable           | Description                                    |
-| ------------------ | ---------------------------------------------- |
-| `DEBRIEF_CLI_PATH` | Fallback for `cliPath` (explicit config wins). |
+| Variable               | Description                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DEBRIEF_CLI_PATH`     | Fallback for `cliPath` (explicit config wins).                                                        |
+| `DEBRIEF_DATA_DIR`     | Fallback for `dataDir`.                                                                               |
+| `DEBRIEF_WHEELS_DIR`   | Wheel directory override (tests; usually unnecessary).                                                |
+| `TELEGRAM_BOT_TOKEN`   | Kernel-side Telegram token (plugin `telegram.botToken` overrides).                                    |
+| `TELEGRAM_CHAT_ID`     | Kernel-side Telegram chat id (plugin `telegram.chatId` overrides).                                    |
+| `TELEGRAM_NEWS_PUSH`   | `false` disables news pushes (on by default; only when configured).                                   |
+| `TELEGRAM_REPORT_PUSH` | `false` disables report pushes (on by default; only when configured).                                 |
+| `PRICE_STALE_SECONDS`  | Seconds after which cached quotes count as stale (default 120); read commands refresh live beyond it. |
+| `DEBRIEF_FX_<CCY>`     | Offline FX fallback: `<CCY>` units per 1 CNY (e.g. `DEBRIEF_FX_USD=7.2`).                             |
+
+## Live quotes / FX / Telegram
+
+- **Live quotes**: `holdings` / `watchlist` / `dashboard` / `analysis prepare`
+  refresh stale quotes live by default (older than `PRICE_STALE_SECONDS`);
+  `--refresh` forces a full refresh, `--no-refresh` reads the cache only. Without
+  the collectors extra the kernel degrades silently to cached data.
+- **FX**: the dashboard payload carries an `fx` block (free open.er-api.com, no
+  key, seconds of latency accepted) which powers the CNY/USD/HKD total-assets
+  switcher on the Portfolio page; on provider failure the page shows CNY only.
+- **Telegram**: send-only. News is pushed when the kernel worker collects new
+  items; reports are pushed when `report create` writes them back. Check with
+  `debrief notify status`, test with `notify test` (unconfigured →
+  `DEBRIEF_TELEGRAM_UNCONFIGURED`).
 
 ## UI notes
 

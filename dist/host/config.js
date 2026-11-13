@@ -13,5 +13,8 @@ export function normalizeConfig(raw, env) {
         timeoutMs: Number.isFinite(timeoutMs) ? Math.max(1000, timeoutMs) : 15000,
         enableSetup: raw?.enableSetup ?? true,
         enableDashboardRoute: raw?.enableDashboardRoute ?? true,
+        telegram: raw?.telegram && (typeof raw.telegram.botToken === 'string' || typeof raw.telegram.chatId === 'string')
+            ? { botToken: raw.telegram.botToken, chatId: raw.telegram.chatId }
+            : undefined,
     };
 }

@@ -67,6 +67,9 @@ def _make_seed(db_path):
         upsert_price(session, "600519", "CN", today, close=1412.0, source="seed")
         upsert_price(session, "AAPL", "US", yesterday, close=182.4, source="seed")
         upsert_price(session, "AAPL", "US", today, close=189.5, source="seed")
+        # Watchlist ticker must have a fresh row too: on-read refresh treats
+        # tickers WITHOUT price rows as stale, which would hit real adapters.
+        upsert_price(session, "00700", "HK", today, close=370.0, source="seed")
     finally:
         session.close()
     engine.dispose()
@@ -79,6 +82,23 @@ def seeded_db(tmp_path, monkeypatch):
     monkeypatch.setenv("DEBRIEF_FX_HKD", "0.92")
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     return _make_seed(tmp_path / "kernel.db")
+
+
+@pytest.fixture(autouse=True)
+def offline_fx_rates(monkeypatch):
+    """The dashboard fx block must never hit open.er-api.com in tests."""
+    import debrief.kernel as kernel
+
+    monkeypatch.setattr(
+        kernel,
+        "get_rates",
+        lambda base="CNY": {
+            "base": (base or "CNY").upper(),
+            "asOf": "2026-11-13T00:00:00+00:00",
+            "rates": {"CNY": 1.0, "USD": 0.14, "HKD": 1.09, "EUR": 0.13},
+            "source": "open.er-api.com",
+        },
+    )
 
 
 @pytest.fixture

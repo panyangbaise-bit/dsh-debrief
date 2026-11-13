@@ -256,7 +256,10 @@ def upsert_price(
     low: float = None,
     volume: float = None,
     source: str = "",
+    fetched_at: datetime = None,
 ) -> PriceCache:
+    if fetched_at is None:
+        fetched_at = datetime.now(timezone.utc)
     existing = (
         session.query(PriceCache)
         .filter(
@@ -272,6 +275,7 @@ def upsert_price(
         existing.low = low
         existing.volume = volume
         existing.source = source
+        existing.fetched_at = fetched_at
         session.commit()
         return existing
     entry = PriceCache(
@@ -284,6 +288,7 @@ def upsert_price(
         close=close,
         volume=volume,
         source=source,
+        fetched_at=fetched_at,
     )
     session.add(entry)
     session.commit()

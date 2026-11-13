@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { normalizeConfig } from '../src/host/config'
-import { defineTools, validateWritePayload, writePayloadShapes } from '../src/host/tools'
+import {
+  defineTools,
+  newsArgs,
+  refreshArgs,
+  telegramArgs,
+  validateWritePayload,
+  writePayloadShapes,
+} from '../src/host/tools'
 import { validate } from '../src/host/schema'
 
 // A path that cannot exist, so the "CLI absent" assertions stay deterministic on
@@ -26,6 +33,7 @@ describe('tool registry', () => {
       'debrief_jobs',
       'debrief_dashboard',
       'debrief_news',
+      'debrief_telegram',
       'debrief_report_create',
       'debrief_memory_compact_write',
       'debrief_memory_add',
@@ -84,6 +92,56 @@ describe('tool registry', () => {
     // The configured CLI path cannot exist; the only invariant is a structured envelope.
     expect(result).toHaveProperty('ok')
     expect(result).toHaveProperty('error')
+  })
+
+  it('drops the market parameter from debrief_news and declares limit/refresh/notify', () => {
+    const tool = tools.find((candidate) => candidate.name === 'debrief_news')!
+    const parameters = tool.parameters as { properties?: Record<string, unknown> }
+    expect(parameters.properties?.market).toBeUndefined()
+    expect(parameters.properties?.limit).toBeDefined()
+    expect(parameters.properties?.refresh).toBeDefined()
+    expect(parameters.properties?.notify).toBeDefined()
+  })
+
+  it('maps debrief_news arguments to latest with limit/refresh/notify flags', () => {
+    expect(newsArgs({})).toEqual(['latest'])
+    expect(newsArgs({ limit: 10 })).toEqual(['latest', '--limit', '10'])
+    expect(newsArgs({ refresh: false })).toEqual(['latest', '--no-refresh'])
+    expect(newsArgs({ notify: true })).toEqual(['latest', '--notify'])
+    expect(newsArgs({ limit: 5, refresh: false, notify: true })).toEqual([
+      'latest',
+      '--limit',
+      '5',
+      '--no-refresh',
+      '--notify',
+    ])
+    // Default refresh (true) and notify (false) add no flags.
+    expect(newsArgs({ refresh: true, notify: false })).toEqual(['latest'])
+  })
+
+  it('registers debrief_telegram with the notify command and a required action', async () => {
+    const tool = tools.find((candidate) => candidate.name === 'debrief_telegram')!
+    const parameters = tool.parameters as { required?: string[] }
+    expect(parameters.required).toEqual(['action'])
+    expect(telegramArgs({ action: 'test' })).toEqual(['test'])
+    expect(telegramArgs({ action: 'status' })).toEqual(['status'])
+    // Missing action fails the argument gate before any CLI call.
+    const missing = await tool.execute({}, { signal: new AbortController().signal })
+    expect(missing).toMatchObject({ ok: false, error: { code: 'DEBRIEF_ARGS' } })
+  })
+
+  it('appends --refresh for the quote-backed read tools only when refresh is true', () => {
+    expect(refreshArgs({})).toEqual([])
+    expect(refreshArgs({ refresh: true })).toEqual(['--refresh'])
+    expect(refreshArgs({ refresh: false })).toEqual([])
+    const holdings = tools.find((candidate) => candidate.name === 'debrief_holdings')!
+    const dashboard = tools.find((candidate) => candidate.name === 'debrief_dashboard')!
+    const analyze = tools.find((candidate) => candidate.name === 'debrief_analyze')!
+    const watchlist = tools.find((candidate) => candidate.name === 'debrief_watchlist')!
+    for (const tool of [holdings, dashboard, analyze, watchlist]) {
+      const properties = (tool.parameters as { properties?: Record<string, unknown> }).properties ?? {}
+      expect(properties.refresh, `${tool.name} must declare refresh`).toBeDefined()
+    }
   })
 
   it('fails fast with DEBRIEF_ARGS when a write payload does not match its schema', async () => {

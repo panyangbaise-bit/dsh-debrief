@@ -118,6 +118,9 @@ const zh = {
     'page.addWatch': '+ 添加自选',
     'page.addComing': '添加持仓 / 自选将在 v2 提供（走 DSH 确认流）',
     'page.refreshed': '更新于 {time}',
+    'page.currency': '显示币种',
+    'page.fxRate': '1 CNY ≈ {rate} {ccy} · 汇率更新 {time}',
+    'page.fxMissing': '汇率暂不可用，仅按人民币显示',
     'page.kpiTotalAssets': '总资产',
     'page.kpiDayPnl': '今日收益',
     'page.kpiTotalPnl': '总收益',
@@ -292,6 +295,9 @@ const en = {
     'page.addWatch': '+ Add watch',
     'page.addComing': 'Adding holdings / watchlist arrives in v2 (DSH confirmation flow)',
     'page.refreshed': 'Updated {time}',
+    'page.currency': 'Display currency',
+    'page.fxRate': '1 CNY ≈ {rate} {ccy} · FX updated {time}',
+    'page.fxMissing': 'FX unavailable, showing CNY only',
     'page.kpiTotalAssets': 'Total assets',
     'page.kpiDayPnl': 'Day return',
     'page.kpiTotalPnl': 'Total return',
@@ -514,6 +520,7 @@ const POSITION_ROW = {
     marketValue: opt(num()),
     pnlPct: opt(num()),
     weight: opt(num()),
+    currency: opt(s()),
 };
 const WATCH_ROW = {
     market: opt(s()),
@@ -524,6 +531,7 @@ const WATCH_ROW = {
     targetPrice: opt(num()),
     distancePct: opt(num()),
     alert: opt({ type: 'boolean' }),
+    currency: opt(s()),
 };
 function renderModel(kind, data) {
     if (!data || typeof data !== 'object')
@@ -560,6 +568,9 @@ function renderModel(kind, data) {
                 composition: opt(arr(obj({ name: opt(s()), value: opt(num()) }))),
                 holdings: opt(arr(obj(POSITION_ROW))),
                 watchlist: opt(arr(obj(WATCH_ROW))),
+                fx: opt(obj({ base: opt(s()), asOf: opt(s()), rates: opt(obj({})), source: opt(s()) })),
+                pricesRefreshed: opt({ type: 'boolean' }),
+                priceErrors: opt(arr(s())),
             }), data);
             return result.ok
                 ? { ok: true, model: result.value }
@@ -765,8 +776,15 @@ function clientFactory(requireFn) {
             return '—';
         return (value > 0 ? '+' : '') + value.toFixed(2) + '%';
     }
-    function money(n) {
-        return '¥' + Math.round(Number(n) || 0).toLocaleString('zh-CN');
+    const MONEY_SYMBOLS = { CNY: '¥', USD: '$', HKD: 'HK$' };
+    const CURRENCIES = ['CNY', 'USD', 'HKD'];
+    function money(n, ccy = 'CNY') {
+        return (MONEY_SYMBOLS[ccy] ?? '¥') + Math.round(Number(n) || 0).toLocaleString('zh-CN');
+    }
+    /** Inline per-row currency suffix, e.g. `' USD'`, from the kernel `currency` field. */
+    function unit(row) {
+        const c = row?.currency;
+        return typeof c === 'string' && c !== '' ? ' ' + c : '';
     }
     function updown(v) {
         const value = Number(v);
@@ -985,7 +1003,7 @@ function clientFactory(requireFn) {
             v: money(record.totalPnl),
             d: pct(record.totalPnlPct),
             cls: updown(record.totalPnlPct),
-        })), h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.quantity')), h('th', null, t('col.cost')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')))), h('tbody', null, positions.map((p) => h('tr', { key: String(p.symbol ?? '') }, h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.quantity, 4)), h('td', null, fmt(p.cost)), h('td', null, fmt(p.price)), h('td', null, fmt(p.marketValue, 0)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`, h('span', { className: 'dbr-wbar' }, h('i', { style: { width: `${Math.min(100, Number(p.weight ?? 0) * 4)}%` } })))))))));
+        })), h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.quantity')), h('th', null, t('col.cost')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')))), h('tbody', null, positions.map((p) => h('tr', { key: String(p.symbol ?? '') }, h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.quantity, 4)), h('td', null, fmt(p.cost) + unit(p)), h('td', null, fmt(p.price) + unit(p)), h('td', null, fmt(p.marketValue, 0) + unit(p)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`, h('span', { className: 'dbr-wbar' }, h('i', { style: { width: `${Math.min(100, Number(p.weight ?? 0) * 4)}%` } })))))))));
     }
     function TxCard(props) {
         const t = pickT(props.t);
@@ -1022,7 +1040,7 @@ function clientFactory(requireFn) {
             title: t('watchlist.title'),
             tool: 'debrief_watchlist',
             meta: t('watchlist.count', { count: record.count ?? items.length }),
-        }, h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.changePct')), h('th', null, t('col.targetPrice')), h('th', null, t('col.distancePct')), h('th', null, t('col.alert')))), h('tbody', null, items.map((w) => h('tr', { key: String(w.symbol ?? '') }, h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price)), h('td', { className: updown(w.changePct) }, pct(w.changePct)), h('td', null, fmt(w.targetPrice)), h('td', { className: updown(w.distancePct) }, pct(w.distancePct)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff')))))))), h('div', { className: 'dbr-hint' }, t('watchlist.hint')));
+        }, h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.changePct')), h('th', null, t('col.targetPrice')), h('th', null, t('col.distancePct')), h('th', null, t('col.alert')))), h('tbody', null, items.map((w) => h('tr', { key: String(w.symbol ?? '') }, h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price) + unit(w)), h('td', { className: updown(w.changePct) }, pct(w.changePct)), h('td', null, fmt(w.targetPrice) + unit(w)), h('td', { className: updown(w.distancePct) }, pct(w.distancePct)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff')))))))), h('div', { className: 'dbr-hint' }, t('watchlist.hint')));
     }
     function ReportCard(props) {
         const t = pickT(props.t);
@@ -1164,8 +1182,8 @@ function clientFactory(requireFn) {
             icon: ICONS.news,
             title: t('news.title'),
             tool: 'debrief_news',
-            meta: t('news.count', { count: items.length, fetchedAt: String(record.fetchedAt ?? '') }),
-        }, h('div', { className: 'dbr-tl' }, items.map((n, index) => h('div', { className: 'dbr-tl-item', key: `${String(n.title ?? '')}${index}` }, h('span', { className: 'dbr-dot ok' }), h('span', { className: 'dbr-tl-title' }, String(n.title ?? '')), h('span', { className: 'dbr-tl-time' }, String(n.at ?? '')), h('span', { className: 'dbr-tl-sub' }, `${marketName(t, n.market)} · ${String(n.source ?? '')}`)))), items.length === 0 ? h('div', { className: 'dbr-hint' }, t('news.empty')) : null);
+            meta: t('news.count', { count: items.length, fetchedAt: String(record.fetchedAt ?? record.asOf ?? '') }),
+        }, h('div', { className: 'dbr-tl' }, items.map((n, index) => h('div', { className: 'dbr-tl-item', key: `${String(n.title ?? n.headline ?? '')}${index}` }, h('span', { className: 'dbr-dot ok' }), h('span', { className: 'dbr-tl-title' }, String(n.title ?? n.headline ?? '')), h('span', { className: 'dbr-tl-time' }, String(n.publishedAt ?? n.at ?? '')), h('span', { className: 'dbr-tl-sub' }, [marketName(t, n.market), String(n.source ?? '')].filter((segment) => segment !== '').join(' · '))))), items.length === 0 ? h('div', { className: 'dbr-hint' }, t('news.empty')) : null);
     }
     function WriteResultCard(props) {
         const t = pickT(props.t);
@@ -1257,9 +1275,9 @@ function clientFactory(requireFn) {
             : null, composition.length > 0
             ? h('div', { className: 'dbr-sec' }, h('div', { className: 'dbr-sec-title' }, t('dashboard.composition')), h('div', { className: 'dbr-donut' }, donutSvg(composition, t('dashboard.positions', { count: holdings.length }), '100%', t('chart.donutAria')), donutLegend(composition)))
             : null, holdings.length > 0
-            ? h('div', { className: 'dbr-sec' }, h('div', { className: 'dbr-sec-title' }, t('dashboard.holdings')), h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')))), h('tbody', null, holdings.map((p) => h('tr', { key: String(p.symbol ?? '') }, h('td', null, String(p.symbol ?? '')), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.price)), h('td', null, fmt(p.marketValue, 0)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`)))))))
+            ? h('div', { className: 'dbr-sec' }, h('div', { className: 'dbr-sec-title' }, t('dashboard.holdings')), h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')))), h('tbody', null, holdings.map((p) => h('tr', { key: String(p.symbol ?? '') }, h('td', null, String(p.symbol ?? '')), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.price) + unit(p)), h('td', null, fmt(p.marketValue, 0) + unit(p)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`)))))))
             : null, watchlist.length > 0
-            ? h('div', { className: 'dbr-sec' }, h('div', { className: 'dbr-sec-title' }, t('watchlist.title')), h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.targetPrice')), h('th', null, t('col.alert')))), h('tbody', null, watchlist.map((w) => h('tr', { key: String(w.symbol ?? '') }, h('td', null, String(w.symbol ?? '')), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price)), h('td', null, fmt(w.targetPrice)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff')))))))))
+            ? h('div', { className: 'dbr-sec' }, h('div', { className: 'dbr-sec-title' }, t('watchlist.title')), h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.targetPrice')), h('th', null, t('col.alert')))), h('tbody', null, watchlist.map((w) => h('tr', { key: String(w.symbol ?? '') }, h('td', null, String(w.symbol ?? '')), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price) + unit(w)), h('td', null, fmt(w.targetPrice) + unit(w)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff')))))))))
             : null, h('div', { className: 'dbr-hint' }, t('dashboard.hint')));
     }
     function rangeLabel(t, range) {
@@ -1578,6 +1596,7 @@ function clientFactory(requireFn) {
     function DashboardPage(props) {
         const t = pickT(props.t);
         const [range, setRange] = React.useState('90');
+        const [ccy, setCcy] = React.useState('CNY');
         const [state, setState] = React.useState({ status: 'loading', data: null, error: null });
         const [attempt, setAttempt] = React.useState(0);
         const [modal, setModal] = React.useState(null);
@@ -1636,13 +1655,32 @@ function clientFactory(requireFn) {
         const composition = toArray(record?.composition);
         const holdings = toArray(record?.holdings);
         const watchlist = toArray(record?.watchlist);
+        const fx = (record?.fx ?? null);
+        const rates = fx?.rates ?? {};
+        const rawFactor = ccy === 'CNY' ? 1 : Number(rates[ccy]);
+        const fxOk = Number.isFinite(rawFactor) && rawFactor > 0;
+        const factor = fxOk ? rawFactor : 1;
+        const activeCcy = fxOk ? ccy : 'CNY';
+        const fxTime = (() => {
+            const asOf = fx?.asOf;
+            const parsed = typeof asOf === 'string' ? new Date(asOf) : null;
+            return parsed !== null && !Number.isNaN(parsed.getTime())
+                ? parsed.toLocaleTimeString('zh-CN')
+                : new Date().toLocaleTimeString('zh-CN');
+        })();
         return h('div', { className: 'dbr-page' }, h('div', { className: 'dbr-page-head' }, h('div', { className: 'dbr-page-title' }, t('page.panel')), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('dashboard.range', { range: '' }) }, RANGES.map((value) => h('button', {
             type: 'button',
             key: value,
             className: 'dbr-chip' + (value === range ? ' active' : ''),
             'aria-pressed': value === range,
             onClick: () => setRange(value),
-        }, rangeLabel(t, value))))), state.status === 'loading'
+        }, rangeLabel(t, value)))), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('page.currency') }, CURRENCIES.filter((value) => value === 'CNY' || rates[value] !== undefined).map((value) => h('button', {
+            type: 'button',
+            key: value,
+            className: 'dbr-chip' + (value === activeCcy ? ' active' : ''),
+            'aria-pressed': value === activeCcy,
+            onClick: () => setCcy(value),
+        }, value)))), state.status === 'loading'
             ? h('div', { className: 'dbr-page-grid' }, h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-skeleton' })))
             : state.status === 'error'
                 ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-page-err' }, h('div', { className: 'dbr-err' }, h('span', { className: 'dbr-code' }, state.error?.code ?? 'DEBRIEF_ERROR'), h('span', null, state.error?.message ?? '')), h('button', { type: 'button', className: 'dbr-more', onClick: () => setAttempt((previous) => previous + 1) }, t('page.retry'))))
@@ -1651,22 +1689,24 @@ function clientFactory(requireFn) {
                     : h('div', { className: 'dbr-page-grid' }, h('div', {
                         className: 'wide dbr-stats',
                         style: { marginBottom: 0, gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' },
-                    }, h(Stat, { k: t('page.kpiTotalAssets'), v: money(kpis.totalAssets) }), h(Stat, {
+                    }, h(Stat, { k: t('page.kpiTotalAssets'), v: money(Number(kpis.totalAssets) * factor, activeCcy) }), h(Stat, {
                         k: t('page.kpiDayPnl'),
-                        v: money(kpis.dayPnl),
+                        v: money(Number(kpis.dayPnl) * factor, activeCcy),
                         d: pct(kpis.dayPnlPct),
                         cls: updown(kpis.dayPnlPct),
                     }), h(Stat, {
                         k: t('page.kpiTotalPnl'),
-                        v: money(kpis.totalPnl),
+                        v: money(Number(kpis.totalPnl) * factor, activeCcy),
                         d: pct(kpis.totalPnlPct),
                         cls: updown(kpis.totalPnlPct),
-                    }), h(Stat, { k: t('page.kpiAnnual'), v: pct(kpis.annualPct) })), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.equity'), h('span', { className: 'dbr-hint', style: { margin: '0 0 0 auto' } }, t('page.refreshed', { time: new Date().toLocaleTimeString('zh-CN') }))), equity.length > 1
+                    }), h(Stat, { k: t('page.kpiAnnual'), v: pct(kpis.annualPct) })), h('div', { className: 'wide dbr-hint', style: { textAlign: 'right' } }, fx !== null && fxOk
+                        ? t('page.fxRate', { rate: fmt(factor, 4), ccy: activeCcy, time: fxTime })
+                        : t('page.fxMissing')), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.equity'), h('span', { className: 'dbr-hint', style: { margin: '0 0 0 auto' } }, t('page.refreshed', { time: new Date().toLocaleTimeString('zh-CN') }))), equity.length > 1
                         ? h(LazyChart, {
                             t,
                             title: t('dashboard.equity'),
-                            points: equity,
-                            fmtLabel: (v) => money(v),
+                            points: equity.map((v) => v * factor),
+                            fmtLabel: (v) => money(v, activeCcy),
                         })
                         : null), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.returns')), returns.length > 1
                         ? h(LazyChart, {
@@ -1683,7 +1723,7 @@ function clientFactory(requireFn) {
                         className: 'dbr-more',
                         onClick: () => setModal({ entity: 'holding', mode: 'add' }),
                     }, t('edit.addHolding'))), holdings.length > 0
-                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.quantity')), h('th', null, t('col.cost')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')), h('th', { style: { textAlign: 'right' } }, t('edit.update')))), h('tbody', null, holdings.map((p) => h('tr', { key: String(p.id ?? p.symbol ?? '') }, h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.quantity, 4)), h('td', null, fmt(p.cost)), h('td', null, fmt(p.price)), h('td', null, fmt(p.marketValue, 0)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`), h('td', null, h('span', { className: 'dbr-row-actions' }, h('button', {
+                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.quantity')), h('th', null, t('col.cost')), h('th', null, t('col.price')), h('th', null, t('col.marketValue')), h('th', null, t('col.pnlPct')), h('th', null, t('col.weight')), h('th', { style: { textAlign: 'right' } }, t('edit.update')))), h('tbody', null, holdings.map((p) => h('tr', { key: String(p.id ?? p.symbol ?? '') }, h('td', null, String(p.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, p.market))), h('td', null, String(p.name ?? '')), h('td', null, fmt(p.quantity, 4)), h('td', null, fmt(p.cost) + unit(p)), h('td', null, fmt(p.price) + unit(p)), h('td', null, fmt(p.marketValue, 0) + unit(p)), h('td', { className: updown(p.pnlPct) }, pct(p.pnlPct)), h('td', null, `${Number(p.weight ?? 0)}%`), h('td', null, h('span', { className: 'dbr-row-actions' }, h('button', {
                             type: 'button',
                             className: 'dbr-btn sm',
                             onClick: () => setModal({ entity: 'holding', mode: 'edit', row: p }),
@@ -1697,7 +1737,7 @@ function clientFactory(requireFn) {
                         className: 'dbr-more',
                         onClick: () => setModal({ entity: 'watchlist', mode: 'add' }),
                     }, t('edit.addWatch'))), watchlist.length > 0
-                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.changePct')), h('th', null, t('col.targetPrice')), h('th', null, t('col.distancePct')), h('th', null, t('col.alert')), h('th', { style: { textAlign: 'right' } }, t('edit.update')))), h('tbody', null, watchlist.map((w) => h('tr', { key: String(w.id ?? w.symbol ?? '') }, h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price)), h('td', { className: updown(w.changePct) }, pct(w.changePct)), h('td', null, fmt(w.targetPrice)), h('td', { className: updown(w.distancePct) }, pct(w.distancePct)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff'))), h('td', null, h('span', { className: 'dbr-row-actions' }, h('button', {
+                        ? h('div', { className: 'dbr-wrap' }, h('table', { className: 'dbr-table' }, h('thead', null, h('tr', null, h('th', null, t('col.symbol')), h('th', null, t('col.name')), h('th', null, t('col.price')), h('th', null, t('col.changePct')), h('th', null, t('col.targetPrice')), h('th', null, t('col.distancePct')), h('th', null, t('col.alert')), h('th', { style: { textAlign: 'right' } }, t('edit.update')))), h('tbody', null, watchlist.map((w) => h('tr', { key: String(w.id ?? w.symbol ?? '') }, h('td', null, String(w.symbol ?? ''), h('span', { className: 'dbr-sub' }, marketName(t, w.market))), h('td', null, String(w.name ?? '')), h('td', null, fmt(w.price) + unit(w)), h('td', { className: updown(w.changePct) }, pct(w.changePct)), h('td', null, fmt(w.targetPrice) + unit(w)), h('td', { className: updown(w.distancePct) }, pct(w.distancePct)), h('td', null, h('span', { className: 'dbr-b ' + (w.alert ? 'warn' : 'neutral') }, w.alert ? t('watchlist.alertOn') : t('watchlist.alertOff'))), h('td', null, h('span', { className: 'dbr-row-actions' }, h('button', {
                             type: 'button',
                             className: 'dbr-btn sm',
                             onClick: () => setModal({ entity: 'watchlist', mode: 'edit', row: w }),

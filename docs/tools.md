@@ -12,12 +12,13 @@
 ### debrief_holdings · 持仓总览
 
 ```json
-{
-  "status": "open ｜ 省略=全部"
-}
+{ "status": "open ｜ 省略=全部", "refresh": true }
 ```
 
-CLI：`debrief holdings --json [--status open]` → `{ asOf, currency, totalMarketValue, dayPnl, dayPnlPct, totalPnl, totalPnlPct, positions[] }`
+CLI：`debrief holdings --json [--status open] [--refresh] [--no-refresh]` →
+`{ asOf, currency, totalMarketValue, dayPnl, dayPnlPct, totalPnl, totalPnlPct, pricesRefreshed, priceErrors?, positions[] }`；
+position 带 `currency`（CNY/USD/HKD）。`refresh` 缺省 = 自动实时刷新过期行情；
+`refresh: true` 映射 `--refresh` 强制全部刷新；`--no-refresh` 只读缓存。
 
 ### debrief_transactions · 成交明细
 
@@ -29,7 +30,11 @@ CLI：`debrief transactions --json [--ticker X] [--limit N] [--offset N]` → `{
 
 ### debrief_watchlist · 监察表
 
-无参数。CLI：`debrief watchlist --json` → `{ count, items[] }`
+```json
+{ "refresh": true }
+```
+
+CLI：`debrief watchlist --json [--refresh] [--no-refresh]` → `{ count, pricesRefreshed, items[] }`；item 带 `currency`。
 
 ### debrief_instruments · 选标搜索
 
@@ -63,10 +68,11 @@ CLI：`debrief memory search --query <q> --json` →
 ### debrief_analyze · 盘后分析输入包
 
 ```json
-{ "market": "us|cn|hk|crypto" }
+{ "market": "us|cn|hk|crypto", "refresh": true }
 ```
 
-CLI：`debrief analysis prepare --market <m> --json` → `{ market, preparedAt, jobId, inputs: { quotes[], news[], memoryCandidates[] }, guidance }`
+CLI：`debrief analysis prepare --market <m> --json [--refresh] [--no-refresh]` →
+`{ market, preparedAt, jobId, pricesRefreshed, inputs: { quotes[], news[], memoryCandidates[] }, guidance }`
 agent 基于输入包自行生成结论（内核无 LLM）。
 
 ### debrief_jobs · 任务台账
@@ -76,19 +82,34 @@ agent 基于输入包自行生成结论（内核无 LLM）。
 ### debrief_dashboard · 投资组合聚合
 
 ```json
-{ "range": "30|90|200|365" }
+{ "range": "30|90|200|365", "refresh": true }
 ```
 
-CLI：`debrief dashboard --json [--range N]` → `{ kpis, series: { range, equity[], returns[] }, composition[], holdings[], watchlist[] }`
+CLI：`debrief dashboard --json [--range N] [--refresh] [--no-refresh]` →
+`{ kpis, series: { range, equity[], returns[] }, composition[], holdings[], watchlist[], fx, pricesRefreshed }`
+`fx = { base: "CNY", asOf, rates: { CNY, USD, HKD, EUR }, source } | null`
+（free open.er-api.com；失败为 null，页面仅按 CNY 展示）。
 
 ### debrief_news · 新闻速览
 
 ```json
-{ "market": "us|cn|hk|crypto", "limit": 20 }
+{ "limit": 20, "refresh": true, "notify": false }
 ```
 
-CLI：`debrief news latest --json [--market X] [--limit N]` → `{ fetchedAt, items[] }`
-（内核 APScheduler 抓取原文，无摘要；摘要由 debrief-news 技能在会话内生成。）
+CLI：`debrief news latest --json [--limit N] [--no-refresh] [--notify]` →
+`{ items: [{ id, title, source, url, summary, publishedAt }], total, fetched, newCount, asOf, notified? }`
+默认实时拉取并落库（标题去重）；`refresh: false` 映射 `--no-refresh` 只读最近一批；
+`notify: true` 在拉到新条目时额外推送 Telegram（需已配置）。
+（无摘要；要点由 debrief-news 技能在会话内生成，相关性过滤由 agent 完成。）
+
+### debrief_telegram · Telegram 推送检查/测试
+
+```json
+{ "action": "test ｜ status" }
+```
+
+CLI：`debrief notify test --json`（未配置 → `DEBRIEF_TELEGRAM_UNCONFIGURED`；成功 → `{ sent }`）
+/ `debrief notify status --json` → `{ configured, chatIdSet, tokenMask }`（token 打码）。
 
 ## 白名单写工具（仅定时 skill 会话）
 
@@ -173,20 +194,22 @@ UI 提交经认证路由 `POST /api/debrief/mutate`（人工确认 = 弹窗提�
 
 ## 稳定错误码
 
-| 错误码                                              | 含义                                        |
-| --------------------------------------------------- | ------------------------------------------- |
-| `DEBRIEF_ARGS`                                      | 参数缺失或 payload 不合 schema              |
-| `DEBRIEF_TIMEOUT`                                   | 内核调用超时                                |
-| `DEBRIEF_CLI_NOT_FOUND`                             | 找不到 CLI（检查 cliPath）                  |
-| `DEBRIEF_CLI_NOT_EXECUTABLE`                        | CLI 不可执行                                |
-| `DEBRIEF_EXEC`                                      | 内核执行失败                                |
-| `DEBRIEF_PARSE`                                     | stdout 不是合法 JSON                        |
-| `DEBRIEF_BAD_PAYLOAD`                               | envelope 结构未知                           |
-| `DEBRIEF_OUTPUT_TOO_LARGE`                          | stdout 超过 8MiB                            |
-| `DEBRIEF_ABORTED`                                   | 调用被取消                                  |
-| `DEBRIEF_USAGE` / `DEBRIEF_NOT_FOUND`               | 内核命令用法错误 / 记录不存在               |
-| `DEBRIEF_CONFLICT`                                  | 记录已存在或被并发修改（重复添加/陈旧更新） |
-| `DEBRIEF_APPROVAL` / `DEBRIEF_APPROVAL_UNAVAILABLE` | 审批被拒 / 审批不可用，写操作被拒绝         |
+| 错误码                                              | 含义                                             |
+| --------------------------------------------------- | ------------------------------------------------ |
+| `DEBRIEF_ARGS`                                      | 参数缺失或 payload 不合 schema                   |
+| `DEBRIEF_TIMEOUT`                                   | 内核调用超时                                     |
+| `DEBRIEF_CLI_NOT_FOUND`                             | 找不到 CLI（检查 cliPath）                       |
+| `DEBRIEF_CLI_NOT_EXECUTABLE`                        | CLI 不可执行                                     |
+| `DEBRIEF_EXEC`                                      | 内核执行失败                                     |
+| `DEBRIEF_PARSE`                                     | stdout 不是合法 JSON                             |
+| `DEBRIEF_BAD_PAYLOAD`                               | envelope 结构未知                                |
+| `DEBRIEF_OUTPUT_TOO_LARGE`                          | stdout 超过 8MiB                                 |
+| `DEBRIEF_ABORTED`                                   | 调用被取消                                       |
+| `DEBRIEF_USAGE` / `DEBRIEF_NOT_FOUND`               | 内核命令用法错误 / 记录不存在                    |
+| `DEBRIEF_CONFLICT`                                  | 记录已存在或被并发修改（重复添加/陈旧更新）      |
+| `DEBRIEF_TELEGRAM_UNCONFIGURED`                     | Telegram 未配置（缺 token 或 chat id）           |
+| `DEBRIEF_FX_UNAVAILABLE`                            | 汇率源不可用（可用 `DEBRIEF_FX_<CCY>` 离线兜底） |
+| `DEBRIEF_APPROVAL` / `DEBRIEF_APPROVAL_UNAVAILABLE` | 审批被拒 / 审批不可用，写操作被拒绝              |
 
 ---
 
@@ -200,16 +223,22 @@ shapes; violations return `DEBRIEF_ARGS`.
 
 | Tool                   | Parameters                             | CLI                                                                     |
 | ---------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
-| `debrief_holdings`     | `status?`                              | `holdings --json [--status open]`                                       |
+| `debrief_holdings`     | `status?`, `refresh?`                  | `holdings --json [--status open] [--refresh] [--no-refresh]`            |
 | `debrief_transactions` | `ticker?`, `limit?`, `offset?`         | `transactions --json [--ticker X] [--limit N] [--offset N]`             |
-| `debrief_watchlist`    | —                                      | `watchlist --json`                                                      |
+| `debrief_watchlist`    | `refresh?`                             | `watchlist --json [--refresh] [--no-refresh]`                           |
 | `debrief_instruments`  | `market`, `query`                      | `instruments search --market <m> --query <q> --json`                    |
 | `debrief_report`       | `id?`, `market?`                       | `report latest --json` / `report --id <id> --json`                      |
 | `debrief_memory`       | `query` (or `compactCandidates: true`) | `memory search --query <q> --json` / `memory compact-candidates --json` |
-| `debrief_analyze`      | `market`                               | `analysis prepare --market <m> --json`                                  |
+| `debrief_analyze`      | `market`, `refresh?`                   | `analysis prepare --market <m> --json [--refresh] [--no-refresh]`       |
 | `debrief_jobs`         | —                                      | `job list --json`                                                       |
-| `debrief_dashboard`    | `range?`                               | `dashboard --json [--range N]`                                          |
-| `debrief_news`         | `market?`, `limit?`                    | `news latest --json [--market X] [--limit N]`                           |
+| `debrief_dashboard`    | `range?`, `refresh?`                   | `dashboard --json [--range N] [--refresh] [--no-refresh]`               |
+| `debrief_news`         | `limit?`, `refresh?`, `notify?`        | `news latest --json [--limit N] [--no-refresh] [--notify]`              |
+| `debrief_telegram`     | `action: test\|status`                 | `notify test --json` / `notify status --json`                           |
+
+Read commands refresh stale quotes live by default (`--refresh` forces all,
+`--no-refresh` reads the cache only); quote caches older than
+`PRICE_STALE_SECONDS` (default 120 s) count as stale. The dashboard payload
+carries the `fx` block that powers the Portfolio page currency switcher.
 
 ## Whitelisted write tools (scheduled skill sessions only)
 
@@ -273,4 +302,6 @@ both or neither is `DEBRIEF_ARGS`.
 | `DEBRIEF_ABORTED`                                   | Call cancelled                                                            |
 | `DEBRIEF_USAGE` / `DEBRIEF_NOT_FOUND`               | Kernel command usage error / record missing                               |
 | `DEBRIEF_CONFLICT`                                  | Record exists or was modified concurrently (duplicate add / stale update) |
+| `DEBRIEF_TELEGRAM_UNCONFIGURED`                     | Telegram not configured (missing token or chat id)                        |
+| `DEBRIEF_FX_UNAVAILABLE`                            | FX provider unavailable (`DEBRIEF_FX_<CCY>` env overrides work offline)   |
 | `DEBRIEF_APPROVAL` / `DEBRIEF_APPROVAL_UNAVAILABLE` | Approval denied / approval unavailable — write refused                    |

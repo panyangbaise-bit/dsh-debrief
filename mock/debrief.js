@@ -276,6 +276,8 @@ const JOBS = [
   },
 ]
 
+const CURRENCY = { CN: 'CNY', HK: 'HKD', US: 'USD', CC: 'USD' }
+
 const NEWS = [
   { title: '半导体设备链订单超预期，板块放量上行', at: '2026-11-11 14:20', source: '财联社', market: 'CN' },
   { title: '美联储官员释放鸽派信号，美债收益率回落', at: '2026-11-11 10:05', source: '路透', market: 'US' },
@@ -380,6 +382,12 @@ function dashboard(range) {
       totalPnlPct: 8.42,
       annualPct: 12.6,
     },
+    fx: {
+      base: 'CNY',
+      asOf: '2026-11-13 22:00',
+      rates: { CNY: 1, USD: 0.1392, HKD: 1.087, EUR: 0.1289 },
+      source: 'open.er-api.com (mock)',
+    },
     series: {
       range: Number(range),
       equity: walk(Number(range), r.eqStart, r.eqEnd, ((r.eqEnd - r.eqStart) * r.eqVol) / 100),
@@ -431,10 +439,12 @@ let reportSeq = persisted.reportSeq ?? 1
 const runningJobs = new Map(Object.entries(persisted.jobs ?? {}))
 const HOLDINGS = (persisted.holdings ?? SEED_HOLDINGS).map((row, index) => ({
   id: row.id ?? `hld-${index + 1}`,
+  currency: CURRENCY[row.market] ?? 'CNY',
   ...row,
 }))
 const WATCHLIST = (persisted.watchlist ?? SEED_WATCHLIST).map((row, index) => ({
   id: row.id ?? `wl-${index + 1}`,
+  currency: CURRENCY[row.market] ?? 'CNY',
   ...row,
 }))
 
@@ -515,6 +525,7 @@ async function main() {
           market: p.market.toUpperCase(),
           symbol: p.symbol,
           name: typeof p.name === 'string' && p.name !== '' ? p.name : p.symbol,
+          currency: CURRENCY[p.market.toUpperCase()] ?? 'CNY',
           quantity: p.quantity,
           cost: p.cost,
           price: p.cost,
@@ -575,6 +586,7 @@ async function main() {
           dayPnlPct: 1.24,
           totalPnl: 95860,
           totalPnlPct: 8.42,
+          pricesRefreshed: !flags['no-refresh'],
           positions,
         }),
       )
@@ -609,6 +621,7 @@ async function main() {
           market: p.market.toUpperCase(),
           symbol: p.symbol,
           name: typeof p.name === 'string' && p.name !== '' ? p.name : p.symbol,
+          currency: CURRENCY[p.market.toUpperCase()] ?? 'CNY',
           price: 0,
           changePct: 0,
           targetPrice: typeof p.targetPrice === 'number' ? p.targetPrice : null,
@@ -653,7 +666,7 @@ async function main() {
         console.log(ok({ id: row.id, status: 'removed' }))
         break
       }
-      console.log(ok({ count: WATCHLIST.length, items: WATCHLIST }))
+      console.log(ok({ count: WATCHLIST.length, pricesRefreshed: !flags['no-refresh'], items: WATCHLIST }))
       break
     }
     case 'instruments': {
@@ -798,6 +811,7 @@ async function main() {
           market: market.toLowerCase(),
           preparedAt: '2026-11-10 15:30',
           jobId: 'debrief-job-2048',
+          pricesRefreshed: !flags['no-refresh'],
           inputs: {
             quotes: [
               { symbol: 'NVDA', name: '英伟达', price: 118.2, changePct: 1.8 },
@@ -819,10 +833,31 @@ async function main() {
       break
     }
     case 'news': {
-      let items = NEWS
-      if (flags.market) items = items.filter((n) => n.market === String(flags.market).toUpperCase())
+      const sub = argv[1] ?? 'latest'
+      if (sub !== 'latest') {
+        console.log(fail('DEBRIEF_USAGE', `unknown news subcommand: ${sub}`))
+        process.exit(2)
+      }
       const limit = Math.min(Number(flags.limit) || 20, 100)
-      console.log(ok({ fetchedAt: '2026-11-11 15:00', items: items.slice(0, limit) }))
+      const refreshed = !flags['no-refresh']
+      const items = NEWS.slice(0, limit).map((n, index) => ({
+        id: 100 + index,
+        title: n.title,
+        source: n.source,
+        url: `https://example.com/news/${100 + index}`,
+        summary: null,
+        publishedAt: n.at,
+      }))
+      console.log(
+        ok({
+          items,
+          total: NEWS.length,
+          fetched: refreshed,
+          newCount: refreshed ? 3 : 0,
+          asOf: refreshed ? '2026-11-13 22:00' : '2026-11-11 15:00',
+          notified: Boolean(flags.notify && refreshed),
+        }),
+      )
       break
     }
     case 'job': {
@@ -878,8 +913,51 @@ async function main() {
       break
     }
     case 'dashboard':
-      console.log(ok(dashboard(flags.range ?? '90')))
+      console.log(ok({ ...dashboard(flags.range ?? '90'), pricesRefreshed: !flags['no-refresh'] }))
       break
+    case 'fx': {
+      const RATES_PER_CNY = { CNY: 1, USD: 0.1392, HKD: 1.087, EUR: 0.1289 }
+      const base = String(flags.base ?? 'CNY').toUpperCase()
+      const baseRate = RATES_PER_CNY[base]
+      if (baseRate === undefined) {
+        console.log(fail('DEBRIEF_FX_UNAVAILABLE', `no rate for base ${base}`))
+        process.exit(1)
+      }
+      const rates = {}
+      for (const [ccy, perCny] of Object.entries(RATES_PER_CNY)) {
+        rates[ccy] = Math.round((perCny / baseRate) * 10000) / 10000
+      }
+      console.log(ok({ base, asOf: '2026-11-13 22:00', rates, source: 'open.er-api.com (mock)' }))
+      break
+    }
+    case 'notify': {
+      const sub = argv[1]
+      if (sub === 'status') {
+        const token = process.env.TELEGRAM_BOT_TOKEN ?? ''
+        const chat = process.env.TELEGRAM_CHAT_ID ?? ''
+        console.log(
+          ok({
+            configured: Boolean(token && chat),
+            chatIdSet: Boolean(chat),
+            tokenMask: token ? `${token.slice(0, 4)}…${token.slice(-4)}` : null,
+          }),
+        )
+        break
+      }
+      if (sub === 'test') {
+        if (!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)) {
+          console.log(
+            fail('DEBRIEF_TELEGRAM_UNCONFIGURED', '未配置 Telegram：请设置 TELEGRAM_BOT_TOKEN 与 TELEGRAM_CHAT_ID'),
+          )
+          process.exit(1)
+        }
+        console.log(ok({ sent: true }))
+        break
+      }
+      console.log(fail('DEBRIEF_USAGE', `unknown notify subcommand: ${sub}`))
+      process.exit(2)
+      break
+    }
     default:
       console.error(`unknown command: ${command}`)
       console.log(fail('DEBRIEF_USAGE', `unknown command ${command}`))

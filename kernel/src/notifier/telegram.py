@@ -267,6 +267,29 @@ def send_urgent_alert(title: str, details: str):
     notify(f"⚠️ <b>{title}</b>\n\n{details}")
 
 
+def notify_news_digest(items, count: Optional[int] = None) -> bool:
+    """Push a compact digest of newly collected headlines (top 6, HH:MM).
+
+    ``items`` are NewsArticle objects; lines with no published time are
+    skipped. ``count`` is the total number of new articles shown in the
+    header (defaults to the number of rendered lines).
+    """
+    lines = []
+    for article in items[:6]:
+        stamp = (
+            format_display_time(article.published_at, fmt="%H:%M")
+            if article.published_at is not None
+            else "—"
+        )
+        if stamp == "—":
+            continue
+        lines.append(f"- {article.headline}（{stamp}）")
+    if not lines:
+        return False
+    shown = count if count is not None else len(lines)
+    return notify(f"📰 <b>新闻推送（新增 {shown} 条）</b>\n\n" + "\n".join(lines))
+
+
 def start_callback_poller():
     """No-op: the kernel keeps Telegram send-only (no getUpdates long-poll)."""
     logger.info("Telegram callback poller disabled (send-only mode).")

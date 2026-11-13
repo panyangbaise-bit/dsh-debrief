@@ -1,6 +1,8 @@
 """Currency conversion helpers (no Streamlit dependency — safe for agent/jobs)."""
 
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Dict, Tuple
 
 import requests
@@ -22,6 +24,61 @@ def _fetch_rate(base_currency: str) -> float:
     if payload.get("result") != "success":
         raise ValueError("FX provider returned an unsuccessful response")
     return float(payload["rates"]["CNY"])
+
+
+def get_rates(base: str = "CNY") -> Dict:
+    """Fetch cross rates for `base` from open.er-api.com (single /latest/CNY call).
+
+    Returns {"base": BASE, "asOf": iso-utc, "rates": {CCY: units_per_1_base},
+             "source": "open.er-api.com"}.
+
+    Env overrides follow the kernel semantics: ``DEBRIEF_FX_USD=7.2`` means
+    7.2 CNY per 1 USD, i.e. units_of_CCY_per_1_CNY = 1/7.2. CNY, USD, HKD and
+    EUR are always present when the provider (or an override) supplies them.
+    Raises ValueError when the provider fails or the base is unavailable.
+    """
+    base = (base or "CNY").upper()
+    try:
+        response = requests.get(_FX_URL.format("CNY"), timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise ValueError(f"FX provider unavailable: {exc}") from None
+    if payload.get("result") != "success":
+        raise ValueError("FX provider returned an unsuccessful response")
+
+    units_per_1_cny: Dict[str, float] = {"CNY": 1.0}
+    for ccy, rate in (payload.get("rates") or {}).items():
+        try:
+            units_per_1_cny[str(ccy).upper()] = float(rate)
+        except (TypeError, ValueError):
+            continue
+
+    # Env overrides applied to the CNY base: DEBRIEF_FX_<CCY> = CNY per 1 CCY.
+    for key, value in os.environ.items():
+        if not key.startswith("DEBRIEF_FX_") or key == "DEBRIEF_FX_":
+            continue
+        ccy = key[len("DEBRIEF_FX_"):].strip().upper()
+        if not ccy or not value:
+            continue
+        try:
+            units_per_1_cny[ccy] = 1.0 / float(value)
+        except (ValueError, ZeroDivisionError):
+            continue
+
+    if base not in units_per_1_cny:
+        raise ValueError(f"no FX rate for base currency {base}")
+    base_units = units_per_1_cny[base]
+    rates = {
+        ccy: round(units / base_units, 8)
+        for ccy, units in units_per_1_cny.items()
+    }
+    return {
+        "base": base,
+        "asOf": datetime.now(timezone.utc).isoformat(),
+        "rates": rates,
+        "source": "open.er-api.com",
+    }
 
 
 def get_cny_rates(markets: Tuple[str, ...]) -> Dict[str, float]:

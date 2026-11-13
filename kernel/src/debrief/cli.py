@@ -54,6 +54,20 @@ def _range_arg(value: Optional[str]) -> int:
     return parsed
 
 
+def _refresh_flag(args: argparse.Namespace) -> Optional[bool]:
+    """--refresh → True (wins), --no-refresh → False, neither → None (auto)."""
+    if getattr(args, "refresh", False):
+        return True
+    if getattr(args, "no_refresh", False):
+        return False
+    return None
+
+
+def _add_refresh_flags(p):
+    p.add_argument("--refresh", action="store_true", help="force a live price refresh")
+    p.add_argument("--no-refresh", action="store_true", help="skip any live price refresh")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="debrief", description="portfolio-agent data kernel CLI")
     parser.add_argument("--db", help="SQLite database path (default: DATABASE_URL / portfolio.db)")
@@ -64,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("holdings", help="read current holdings or write (v2)")
     p.add_argument("--status", choices=["open"], default=None)
+    _add_refresh_flags(p)
     add_json(p)
     hold = p.add_subparsers(dest="holdings_command", required=False)
     for action, help_text in (
@@ -82,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("watchlist", help="read the watchlist or write (v2)")
     p.add_argument("--ticker", default=None)
+    _add_refresh_flags(p)
     add_json(p)
     watch = p.add_subparsers(dest="watchlist_command", required=False)
     for action, help_text in (
@@ -125,6 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     an = p.add_subparsers(dest="analysis_command", required=True)
     ap = an.add_parser("prepare")
     ap.add_argument("--market", required=True)
+    _add_refresh_flags(ap)
     add_json(ap)
 
     p = sub.add_parser("job", help="job ledger operations")
@@ -146,7 +163,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("dashboard", help="dashboard aggregate")
     p.add_argument("--range", default=None)
+    _add_refresh_flags(p)
     add_json(p)
+
+    p = sub.add_parser("news", help="read the collected news feed")
+    nw = p.add_subparsers(dest="news_command", required=True)
+    nl = nw.add_parser("latest", help="latest persisted news")
+    nl.add_argument("--limit", default=None)
+    nl.add_argument("--no-refresh", action="store_true", help="skip the upstream fetch")
+    nl.add_argument("--notify", action="store_true", help="push a digest to Telegram when new items arrived")
+    add_json(nl)
+
+    p = sub.add_parser("fx", help="fetch FX cross rates (open.er-api.com)")
+    p.add_argument("--base", default="CNY")
+    add_json(p)
+
+    p = sub.add_parser("notify", help="Telegram notification test/status")
+    nt = p.add_subparsers(dest="notify_command", required=True)
+    nt_test = nt.add_parser("test", help="send a test push")
+    add_json(nt_test)
+    nt_status = nt.add_parser("status", help="report configuration state (masked)")
+    add_json(nt_status)
 
     p = sub.add_parser("migrate", help="apply pending migrations (idempotent)")
     add_json(p)
@@ -212,6 +249,20 @@ def dispatch(args: argparse.Namespace) -> dict:
         engine = open_engine(resolve_db(args), migrate=False)
         return c.cmd_migrate(engine)
 
+    # Stateless commands need no database session at all.
+    if command == "fx":
+        from debrief import commands as c
+
+        return c.cmd_fx(args.base)
+    if command == "notify":
+        from debrief import commands as c
+
+        if args.notify_command == "test":
+            return c.cmd_notify_test()
+        if args.notify_command == "status":
+            return c.cmd_notify_status()
+        raise UsageError(f"unknown notify subcommand: {args.notify_command}")
+
     if command == "worker":
         # Long-running worker keeps INFO operational logs on stderr.
         logging.getLogger().setLevel(logging.INFO)
@@ -231,13 +282,13 @@ def dispatch(args: argparse.Namespace) -> dict:
     session, _ = open_session(resolve_db(args))
     try:
         if command == "holdings":
-            return c.cmd_holdings(session, args.status)
+            return c.cmd_holdings(session, args.status, refresh=_refresh_flag(args))
         if command == "transactions":
             return c.cmd_transactions(
                 session, args.ticker, _int_arg(args.limit, 20), _int_arg(args.offset, 0)
             )
         if command == "watchlist":
-            return c.cmd_watchlist(session, args.ticker)
+            return c.cmd_watchlist(session, args.ticker, refresh=_refresh_flag(args))
         if command == "instruments":
             if args.instruments_command != "search":
                 raise UsageError(f"unknown instruments subcommand: {args.instruments_command}")
@@ -257,7 +308,16 @@ def dispatch(args: argparse.Namespace) -> dict:
         if command == "analysis":
             if args.analysis_command != "prepare":
                 raise UsageError(f"unknown analysis subcommand: {args.analysis_command}")
-            return c.cmd_analysis_prepare(session, args.market)
+            return c.cmd_analysis_prepare(session, args.market, refresh=_refresh_flag(args))
+        if command == "news":
+            if args.news_command != "latest":
+                raise UsageError(f"unknown news subcommand: {args.news_command}")
+            return c.cmd_news_latest(
+                session,
+                _int_arg(args.limit, 20),
+                refresh=not args.no_refresh,
+                notify=args.notify,
+            )
         if command == "job":
             if args.job_command == "list":
                 return c.cmd_job_list(session, _int_arg(args.limit, 50))
@@ -269,7 +329,9 @@ def dispatch(args: argparse.Namespace) -> dict:
                 return c.cmd_job_finish(session, _int_arg(args.id, 0), args.status, args.error_code)
             raise UsageError(f"unknown job subcommand: {args.job_command}")
         if command == "dashboard":
-            return c.cmd_dashboard(session, _range_arg(args.range))
+            return c.cmd_dashboard(
+                session, _range_arg(args.range), refresh=_refresh_flag(args)
+            )
         raise UsageError(f"unknown command: {command}")
     finally:
         session.close()

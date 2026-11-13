@@ -51,18 +51,20 @@ def test_holdings_schema(seeded_db, run_cli):
     data = payload["data"]
     assert set(data) == {
         "asOf", "currency", "totalMarketValue", "dayPnl", "dayPnlPct", "totalPnl",
-        "totalPnlPct", "positions",
+        "totalPnlPct", "positions", "pricesRefreshed",
     }
     assert data["currency"] == "CNY"
+    assert data["pricesRefreshed"] is True  # auto-refresh ran on the seed
     assert data["totalMarketValue"] > 0
     symbols = {p["symbol"] for p in data["positions"]}
     assert symbols == {"600519", "AAPL"}
     position = next(p for p in data["positions"] if p["symbol"] == "600519")
     assert set(position) == {
         "market", "symbol", "name", "quantity", "cost", "price", "marketValue",
-        "pnlPct", "weight",
+        "pnlPct", "weight", "currency",
     }
     assert position["market"] == "CN"
+    assert position["currency"] == "CNY"
     assert position["quantity"] == 200
     assert position["price"] == 1412.0
     assert position["marketValue"] == 282400.0
@@ -96,14 +98,16 @@ def test_watchlist_schema(seeded_db, run_cli):
     code, payload = run_cli(["--db", str(seeded_db), "watchlist", ])
     assert code == 0
     data = payload["data"]
-    assert set(data) == {"count", "items"}
+    assert set(data) == {"count", "items", "pricesRefreshed"}
+    assert data["pricesRefreshed"] is True
     item = data["items"][0]
     assert set(item) == {
         "market", "symbol", "name", "price", "changePct", "targetPrice",
-        "distancePct", "alert",
+        "distancePct", "alert", "currency",
     }
     assert item["symbol"] == "00700"
     assert item["market"] == "HK"
+    assert item["currency"] == "HKD"
     assert item["targetPrice"] == 380.0
 
 
@@ -169,7 +173,8 @@ def test_report_lifecycle(seeded_db, run_cli):
         ["--db", str(seeded_db), "report", "create", "--json", ], stdin=payload_stdin
     )
     assert code == 0
-    assert set(payload["data"]) == {"id", "status"}
+    assert set(payload["data"]) == {"id", "status", "notified"}
+    assert payload["data"]["notified"] is False  # Telegram unconfigured in tests
     report_id = payload["data"]["id"]
     assert report_id.startswith("rpt-")
 
@@ -237,9 +242,10 @@ def test_analysis_prepare_schema_and_reentrancy(seeded_db, run_cli):
     )
     assert code == 0
     data = payload["data"]
-    assert set(data) == {"market", "preparedAt", "jobId", "inputs", "guidance"}
+    assert set(data) == {"market", "preparedAt", "jobId", "inputs", "guidance", "pricesRefreshed"}
     assert set(data["inputs"]) == {"quotes", "news", "memoryCandidates"}
     assert data["market"] == "us"
+    assert data["pricesRefreshed"] is True
     assert data["inputs"]["quotes"][0]["symbol"] == "AAPL"
     job_id = data["jobId"]
 
@@ -314,7 +320,11 @@ def test_dashboard_schema(seeded_db, run_cli):
     )
     assert code == 0
     data = payload["data"]
-    assert set(data) == {"kpis", "series", "composition", "holdings", "watchlist"}
+    assert set(data) == {"kpis", "series", "composition", "holdings", "watchlist", "fx", "pricesRefreshed"}
+    assert data["pricesRefreshed"] is True
+    assert data["fx"]["base"] == "CNY"
+    assert set(data["fx"]) == {"base", "asOf", "rates", "source"}
+    assert data["fx"]["source"] == "open.er-api.com"
     assert set(data["kpis"]) == {
         "totalAssets", "currency", "dayPnl", "dayPnlPct", "totalPnl", "totalPnlPct", "annualPct",
     }

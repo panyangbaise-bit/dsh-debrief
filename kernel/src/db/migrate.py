@@ -409,6 +409,12 @@ def _migrate_v13_write_columns(conn: Connection) -> None:
         )
 
 
+def _migrate_v14_price_cache_fetched_at(conn: Connection) -> None:
+    """price_cache fetched_at: freshness marker for on-read price refresh."""
+    if "price_cache" in _table_names(conn) and "fetched_at" not in _columns(conn, "price_cache"):
+        conn.execute(text("ALTER TABLE price_cache ADD COLUMN fetched_at DATETIME"))
+
+
 MIGRATIONS = [
     # Each entry: (version, sql_statement | callable)
     # Version 1: add name column to holdings (added 2026-07-18)
@@ -507,6 +513,7 @@ MIGRATIONS = [
     ("v11b_debrief_job_runs_columns", _migrate_v11b_job_runs_columns),
     ("v12_debrief_analysis_reports", _migrate_v12_analysis_reports),
     ("v13_debrief_write_columns", _migrate_v13_write_columns),
+    ("v14_price_cache_fetched_at", _migrate_v14_price_cache_fetched_at),
 ]
 
 

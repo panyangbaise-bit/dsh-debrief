@@ -12,13 +12,15 @@ decisions behind them — so the next session starts better informed.
   model-free data CLI (SQLite + data collection + JSON commands); this plugin
   bridges it with subprocess calls, renders a card for every tool call, and
   ships a read-only Portfolio page. **全部模型工作都在 DSH agent 内完成**：内核是无模型的数据 CLI，插件只做 subprocess 桥接、工具卡片与只读「投资组合」页面（Portfolio）。
-- **19 tools / 工具**：10 个只读工具（`debrief_holdings`、`debrief_transactions`、
+- **20 tools / 工具**：11 个只读工具（`debrief_holdings`、`debrief_transactions`、
   `debrief_watchlist`、`debrief_instruments`、`debrief_report`、`debrief_memory`、
-  `debrief_analyze`、`debrief_jobs`、`debrief_dashboard`、`debrief_news`）+
-  3 个白名单写工具（`debrief_report_create`、`debrief_memory_compact_write`、
-  `debrief_memory_add`，仅供定时 skill 会话使用）+ 6 个 v2 审批门控编辑工具
-  （`debrief_holding_add/update/remove`、`debrief_watchlist_add/update/remove`，
-  对话编辑经 DSH 审批确认流，写操作入内核 `user_actions` 审计）。
+  `debrief_analyze`、`debrief_jobs`、`debrief_dashboard`、`debrief_news`、
+  `debrief_telegram`）+ 3 个白名单写工具（`debrief_report_create`、
+  `debrief_memory_compact_write`、`debrief_memory_add`，仅供定时 skill 会话使用）+
+  6 个 v2 审批门控编辑工具（`debrief_holding_add/update/remove`、
+  `debrief_watchlist_add/update/remove`，对话编辑经 DSH 审批确认流，写操作入内核
+  `user_actions` 审计）。读取默认实时刷新过期行情；新闻实时拉取；Telegram 推送
+  复盘/新闻/提醒（可选配置）。
 - **5 scheduled skills / 定时技能**：`debrief-after-market`（盘后分析 ×4 市场）、
   `debrief-news`（每小时新闻摘要）、`debrief-weekly`（周六周复盘）、
   `debrief-monthly`（月度复盘）、`debrief-compact`（每日记忆压缩）。
@@ -26,9 +28,10 @@ decisions behind them — so the next session starts better informed.
   8 个 DSH Schedule 任务（RRULE 显式 `TZID=Asia/Shanghai`、`new_once` 专属会话）。
 - **UI**：keyed `tool.call.toolview` 卡片（持仓/成交/监察表/报告 SVG 图/记忆证据/
   任务进度/运行台账/投资组合/新闻/写回结果）+ 投资组合页面（Portfolio，KPI 行、资产/收益折线、
-  成分环形图、持仓表、监察表、时间范围 chips）。v2 起投资组合页面支持添加/编辑/删除
-  持仓与自选：市场 chips + 搜索式选标器 + 表单弹窗、删除二次确认、toast 反馈；
-  对话侧同名工具走 DSH 审批确认流。纯 SVG、主题 token、中英双语、IntersectionObserver 懒加载。
+  成分环形图、持仓表、监察表、时间范围 chips、显示币种 chips CNY/USD/HKD）。v2 起投资组合页面
+  支持添加/编辑/删除持仓与自选：市场 chips + 搜索式选标器 + 表单弹窗、删除二次确认、toast 反馈；
+  对话侧同名工具走 DSH 审批确认流。持仓/监察表价格带币种单位（A股与基金 CNY、美股与加密 USD、
+  港股 HKD），总资产按免费汇率接口准实时切换显示币种。纯 SVG、主题 token、中英双语、IntersectionObserver 懒加载。
 
 ## Quick start / 快速开始
 
@@ -44,7 +47,17 @@ the profile's own patch layer) / 在 profile patch 里把插件指向内核 CLI�
   config:
     cliPath: /opt/debrief/bin/debrief # absolute path or PATH name
     timeoutMs: 15000
+    # Optional Telegram pushes (reports + news + watchlist alerts):
+    # telegram:
+    #   botToken: '123456:ABC…'
+    #   chatId: '-100…'
 ```
+
+Reads refresh stale quotes live by default (real-time); the Portfolio page
+switches total assets between CNY/USD/HKD using a free FX feed. Telegram is
+send-only — check `debrief notify status`, test with `debrief notify test`.
+读取默认实时刷新过期行情；投资组合页面支持 CNY/USD/HKD 总资产切换（免费汇率源）。
+Telegram 仅发不收 —— `debrief notify status` 查看状态、`notify test` 测试推送。
 
 Then run the setup command once in any session / 然后在任意会话里执行一次安装命令：
 
@@ -93,13 +106,14 @@ bash examples/demo.sh
 | `enableSetup`          | `true`                                          | Register the `debrief-setup` command / 注册 `debrief-setup` 命令              |
 | `enableDashboardRoute` | `true`                                          | Serve `/api/debrief/dashboard` / 提供投资组合只读路由                         |
 
-**安装即用**：npm 包内置内核 slim wheel 与离线依赖轮子（`kernel/wheels/`，纯
-Python，约 2.6MB）。机器上有 **uv 或 Python ≥3.11** 时，首次使用（managed /
+**安装即用**：npm 包内置内核 wheel（纯 Python）与离线依赖轮子（`kernel/wheels/`，
+约 2.6MB）。机器上有 **uv 或 Python ≥3.11** 时，首次使用（managed /
 auto 且未配置 cliPath）会自动在 `~/.dsh/debrief-runtime/` 自举隔离 venv，全部
-离线安装；采集依赖（collectors）为可选项。服务器部署沿用 external 模式指向
-外部 venv。**Installs-and-runs**: the package bundles the slim kernel wheel and
-its offline dependencies under `kernel/wheels/`; with uv or Python ≥3.11 the
-first managed use bootstraps an isolated venv offline; collectors stay optional.
+离线安装；行情采集依赖（collectors）为可选项。服务器部署沿用 external 模式指向
+外部 venv。**Installs-and-runs**: the package bundles the kernel wheel (pure
+Python) and its offline dependencies under `kernel/wheels/`; with uv or
+Python ≥3.11 the first managed use bootstraps an isolated venv offline;
+collectors stay optional.
 
 Full reference: [docs/configuration.md](docs/configuration.md) · 完整配置见 [docs/configuration.md](docs/configuration.md)。
 

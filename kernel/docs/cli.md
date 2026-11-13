@@ -24,6 +24,7 @@
 | 报告 | `report latest` · `report --id` · `report create`                                     |
 | 记忆 | `memory search` · `memory compact-candidates` · `memory compact-write` · `memory add` |
 | 任务 | `analysis prepare` · `job list/start/status/finish`                                   |
+| 数据 | `news latest` · `fx` · `notify test/status`                                           |
 | 运维 | `migrate` · `worker`                                                                  |
 
 错误码表 / Error codes：`DEBRIEF_USAGE`（参数/命令错误，exit 2）、`DEBRIEF_ARGS`（缺参数）、`DEBRIEF_DB`（库不可用）、`DEBRIEF_NOT_FOUND`、`DEBRIEF_JOB_ALREADY_RUNNING`（分析防重入）、`DEBRIEF_VALIDATION`（stdin JSON 校验失败）、`DEBRIEF_FX_UNAVAILABLE`（汇率缺失）、`DEBRIEF_INTERNAL`。DSH 插件侧还会补充 `DEBRIEF_TIMEOUT` / `DEBRIEF_CLI_NOT_FOUND` / `DEBRIEF_PARSE` / `DEBRIEF_BAD_PAYLOAD`（见 dsh-debrief/index.js）。
@@ -33,7 +34,7 @@
 ## 1. holdings
 
 ```bash
-debrief holdings [--status open] [--json]
+debrief holdings [--status open] [--refresh | --no-refresh] [--json]
 ```
 
 ```json
@@ -45,6 +46,7 @@ debrief holdings [--status open] [--json]
   "dayPnlPct": -2.67,
   "totalPnl": 20953.66,
   "totalPnlPct": 7.69,
+  "pricesRefreshed": true,
   "positions": [
     {
       "market": "CC",
@@ -55,7 +57,8 @@ debrief holdings [--status open] [--json]
       "price": 41.2,
       "marketValue": 824.0,
       "pnlPct": 8.42,
-      "weight": 1.94
+      "weight": 1.94,
+      "currency": "USD"
     }
   ]
 }
@@ -64,6 +67,7 @@ debrief holdings [--status open] [--json]
 - `positions[].market` ∈ `US|CN|HK|CC`；`totalMarketValue/dayPnl/totalPnl` 均为 CNY（汇率来自 open.er-api.com，可用 `DEBRIEF_FX_USD=7.2 DEBRIEF_FX_HKD=0.92` 离线覆盖）。
 - `price` = `price_cache` 最新收盘（缺失时回退成本价）；`dayPnl` 用最新两个快照价差；`totalPnl` 含已清仓实现盈亏。
 - `--status open` 为兼容占位（默认即只含 open 持仓）。
+- **实时价刷新（v14）**：`positions[].currency` = 该市场原生计价货币（`CNY|USD|HKD`，见 `domain.markets`）。默认（不带任何 flag）自动刷新「过期」快照 —— 最新 `price_cache.fetched_at` 为空或早于 `PRICE_STALE_SECONDS`（默认 120s）的 ticker 经线程池（4 workers）重新抓价并 upsert 当日快照。`--refresh` 强制全部刷新；`--no-refresh` 完全跳过（纯缓存读取）。`pricesRefreshed` = 是否实际执行了刷新（即使刷新 0 条；缺 collectors 安装时降级为 false）；`priceErrors`（`"MARKET:TICKER:错误"` 数组，最多 10 条）仅在非空时出现。
 
 ## 2. transactions
 
@@ -99,12 +103,13 @@ debrief transactions [--ticker AAPL] [--limit 20] [--offset 0] [--json]
 ## 3. watchlist
 
 ```bash
-debrief watchlist [--ticker 00700] [--json]
+debrief watchlist [--ticker 00700] [--refresh | --no-refresh] [--json]
 ```
 
 ```json
 {
   "count": 1,
+  "pricesRefreshed": true,
   "items": [
     {
       "market": "HK",
@@ -114,7 +119,8 @@ debrief watchlist [--ticker 00700] [--json]
       "changePct": 0.6,
       "targetPrice": 380.0,
       "distancePct": 8.6,
-      "alert": false
+      "alert": false,
+      "currency": "HKD"
     }
   ]
 }
@@ -122,6 +128,7 @@ debrief watchlist [--ticker 00700] [--json]
 
 - `targetPrice` 取 `target_price_low`（缺失用 high）；`changePct` 用最近两次快照价差（数据不足为 null）；
 - `alert` = 现价已触及关注价（`price <= targetPrice`）。`price/distancePct` 在缺价时为 null。
+- `--refresh/--no-refresh`、`pricesRefreshed`/`priceErrors`、`items[].currency` 语义与 holdings 相同（刷新目标 = 当前查询范围）。
 
 ## 4. instruments search
 
@@ -175,6 +182,7 @@ echo '{"market":"us","title":"盘后分析","summary":"…","fullText":"…","me
 - 必需：`market/title/summary`；可选 `fullText/metrics[]/chart/jobId`。
 - 落 `analysis_reports` + `analysis_charts`（`chart_id` 关联）；写 `user_actions` 审计（`report.create`）。
 - 带 `jobId`：对应 `job_runs` 置 `succeeded` 并回填 `report_id`（返回 `status:"succeeded"`）；job 不存在 → `DEBRIEF_NOT_FOUND`。
+- 返回新增 `notified`（bool）：`TELEGRAM_REPORT_PUSH=true`（默认）且 Telegram 已配置时，向 chat 推送 `📋 复盘报告 · <market>` 摘要；推送失败/未配置均为 false，不影响落库。
 
 ## 6. memory search
 
@@ -265,7 +273,7 @@ echo '{"sourceType":"decision","content":"建仓理由：……","instruments":[
 ## 10. analysis prepare
 
 ```bash
-debrief analysis prepare --market <us|cn|hk|crypto> [--json]
+debrief analysis prepare --market <us|cn|hk|crypto> [--refresh | --no-refresh] [--json]
 ```
 
 ```json
@@ -273,6 +281,7 @@ debrief analysis prepare --market <us|cn|hk|crypto> [--json]
   "market": "us",
   "preparedAt": "2026-11-10 15:30",
   "jobId": 2048,
+  "pricesRefreshed": true,
   "inputs": {
     "quotes": [{ "symbol": "AAPL", "name": "苹果", "price": 189.5, "changePct": 0.4 }],
     "news": [{ "title": "……", "at": "2026-11-10 14:20", "source": "财联社" }],
@@ -283,6 +292,7 @@ debrief analysis prepare --market <us|cn|hk|crypto> [--json]
 ```
 
 - 副作用：创建 `job_runs`（`after-market-<market>`，running）。同市场已有 running → `DEBRIEF_JOB_ALREADY_RUNNING`（防重入锁）。
+- `--refresh/--no-refresh`：行情引用生成前先刷新该市场的持仓+关注列表（同一语义与 `pricesRefreshed`/`priceErrors` 字段，见 §1）。
 - DSH agent 分析后经 `report create {jobId}` 写回并关闭 job。
 
 ## 11. job list / start / status / finish
@@ -307,7 +317,7 @@ debrief job finish --id 7 --status done|failed [--error-code E] [--json]
 ## 12. dashboard
 
 ```bash
-debrief dashboard [--range 30|90|200|365] [--json]
+debrief dashboard [--range 30|90|200|365] [--refresh | --no-refresh] [--json]
 ```
 
 ```json
@@ -317,13 +327,19 @@ debrief dashboard [--range 30|90|200|365] [--json]
   "series": {"range": 90, "equity": [1000000, ...], "returns": [0.0, ...]},
   "composition": [{"name": "贵州茅台", "value": 21.0}],
   "holdings": [/* 同 §1 positions */],
-  "watchlist": [/* 同 §3 items */]
+  "watchlist": [/* 同 §3 items */],
+  "fx": {"base": "CNY", "asOf": "2026-11-13T14:00:00+00:00",
+         "rates": {"CNY": 1.0, "USD": 0.139, "HKD": 1.087, "EUR": 0.128, "…": "…"},
+         "source": "open.er-api.com"},
+  "pricesRefreshed": true
 }
 ```
 
 - 数据源 = `holdings` + `price_cache` 日快照聚合（按 ticker carry-forward）；`returns[i] = equity[i]/equity[0]-1`；`annualPct` = 序列年化（不足 2 点时回退总收益率）。
 - 曲线末端钉住当前组合：若末个快照日期 == 今天（与 `PriceCache.date` 相同的 UTC 日期口径），用当前 `totalAssets` 替换末点；若末日期更早（如新持仓当日无快照行），追加今天数据点（值 = 当前 `totalAssets`）——`equity[-1]` 恒等于 `kpis.totalAssets`；无任何快照时保留单点 = 当前总资产。`returns`/`annualPct` 基于钉住后的序列重算。
 - 抽样上限 = range（30/90/200/365）：点数超限时等距抽样，且首末点必保留。
+- **实时价刷新**：刷新目标 = open 持仓 ∪ 关注列表（合并为一次刷新）；`--refresh/--no-refresh` 与 `pricesRefreshed`/`priceErrors` 语义同 §1。kpis/series/composition 仍保持 CNY 口径不变。
+- **fx 块**：`fx` = 实时交叉汇率（`adapters.fx.get_rates("CNY")`，单次请求 open.er-api.com，`DEBRIEF_FX_<CCY>` 覆盖生效）；任何上游失败 → `fx: null`（页面降级为 CNY 展示，读命令绝不因此报错）。估值数学仍走既有 `cny_rates()` 路径，不受 fx 块影响。
 
 ## 13. migrate
 
@@ -333,7 +349,7 @@ debrief migrate --json
 ```
 
 - 幂等；`applied` = 本次新应用的版本（空 = 已最新）。
-- 完成：drop 旧 trace 表（drop 前一次性 `VACUUM INTO pre-agent-removal-backup.db` 留档）、`user_actions` 去 FK 重建、`analysis_charts` 改挂 `report_id`、`memory_documents` 增 `archived_into/archived_at`、`long_term_memories`/`memory_compaction_runs`/`instrument_catalog`/`analysis_reports` 建表、`job_runs` 增 `error_code/report_id`、`journal_mode=WAL`、`auto_vacuum=INCREMENTAL`、清理指向被删表的 `memory_checkpoints` 游标；v13 再增 `user_actions.payload` 与 `watchlist_items.alert_enabled`。
+- 完成：drop 旧 trace 表（drop 前一次性 `VACUUM INTO pre-agent-removal-backup.db` 留档）、`user_actions` 去 FK 重建、`analysis_charts` 改挂 `report_id`、`memory_documents` 增 `archived_into/archived_at`、`long_term_memories`/`memory_compaction_runs`/`instrument_catalog`/`analysis_reports` 建表、`job_runs` 增 `error_code/report_id`、`journal_mode=WAL`、`auto_vacuum=INCREMENTAL`、清理指向被删表的 `memory_checkpoints` 游标；v13 再增 `user_actions.payload` 与 `watchlist_items.alert_enabled`；**v14** 增 `price_cache.fetched_at`（读命令实时价刷新的新鲜度标记，列存在即跳过）。
 
 ## 14. worker
 
@@ -341,13 +357,70 @@ debrief migrate --json
 debrief worker [--dry-run] [--json]
 ```
 
-- APScheduler 常驻数据采集（**无任何 LLM 调用**）：`prices`（**`*/30 * * * *` 全天每 30 分钟，Asia/Shanghai**，覆盖美股盘后 21:30–04:00、港股尾盘、A 股与加密全天；可用 `PRICES_CRONTAB` 环境变量或 `data/scheduler_settings.json` 的 `prices_crontab` 键覆盖）、`news`（NEWS_CRONTAB，默认 0 8-22/2）、`catalog-sync`（每日 06:10，akshare 列表 + CoinGecko /coins/list）、`reminders`（*/15 提醒比对 + Telegram 通知）、`cleanup`（每日 03:00，`JOB_RUN_RETENTION_DAYS=365` 分批 DELETE + incremental_vacuum）。
+- APScheduler 常驻数据采集（**无任何 LLM 调用**）：`prices`（**`*/30 * * * *` 全天每 30 分钟，Asia/Shanghai**，覆盖美股盘后 21:30–04:00、港股尾盘、A 股与加密全天；可用 `PRICES_CRONTAB` 环境变量或 `data/scheduler_settings.json` 的 `prices_crontab` 键覆盖）、`news`（NEWS_CRONTAB，默认 0 8-22/2；采集后若 `TELEGRAM_NEWS_PUSH=true`（默认）且已配置 Telegram，推送最多 6 条新标题摘要，返回 `{"fetched","saved","notified"}`）、`catalog-sync`（每日 06:10，akshare 列表 + CoinGecko /coins/list）、`reminders`（*/15 提醒比对 + Telegram 通知）、`cleanup`（每日 03:00，`JOB_RUN_RETENTION_DAYS=365` 分批 DELETE + incremental_vacuum）。
 - 上游故障不崩溃：每次运行写 `job_runs`（succeeded / failed + `DEBRIEF_UPSTREAM_*` 错误码）。
 - `--dry-run` 打印排程并退出。
 
 ---
 
-## 15. Decisions（设计歧义定夺记录 / Design decisions）
+## 15. news / fx / notify（数据与通知命令）
+
+### news latest
+
+```bash
+debrief news latest [--limit 20] [--no-refresh] [--notify] [--json]
+```
+
+```json
+{
+  "items": [
+    {
+      "id": 42,
+      "title": "美联储按兵不动",
+      "source": "wallstreetcn",
+      "url": "https://wallstreetcn.com/articles/…",
+      "summary": "……",
+      "publishedAt": "2026-11-13 16:00"
+    }
+  ],
+  "total": 120,
+  "fetched": true,
+  "newCount": 2,
+  "asOf": "2026-11-13 22:21",
+  "notified": false
+}
+```
+
+- 默认先刷新：调用 worker 的 `collect_news`（华尔街见闻最新 20 条，按标题去重后持久化）。上游失败不报错：`fetched=false, newCount=0`，照常返回缓存列表。`--no-refresh` 跳过上游抓取（DSH 小时级新闻技能用缓存流，避免推送骚扰）。
+- `items` = 最新 `limit`（默认 20，上限 100）条 NewsArticle（`publishedAt` 缺省为 `—`）；`total` = 全部新闻行数。
+- `--notify`：`newCount>0` 且 Telegram 已配置时，推送 `📰 新闻推送（新增 n 条）` + 最多 6 行 `- 标题（HH:MM）`（跳过无时间条目）；未配置/无新条目 → `notified=false`，不报错。
+
+### fx
+
+```bash
+debrief fx [--base CNY] [--json]
+# → {"ok":true,"schemaVersion":1,"data":{"base":"CNY","asOf":"2026-11-13T14:21:00+00:00",
+#      "rates":{"CNY":1.0,"USD":0.139,"HKD":1.087,"EUR":0.128,"…":"…"},"source":"open.er-api.com"}}
+```
+
+- 单次请求 `open.er-api.com/v6/latest/CNY` 构造交叉汇率；`rates[c]` = 每 1 单位 base 的 c 币数量。至少含 CNY/USD/HKD/EUR（上游缺失时省略）。
+- 环境变量覆盖沿用内核语义：`DEBRIEF_FX_USD=7.2` 表示 7.2 CNY 兑 1 USD（即 `rates.USD = 1/7.2`）。
+- 上游失败 → `DEBRIEF_FX_UNAVAILABLE`（message 附 `DEBRIEF_FX_<CCY>=…` 覆盖与连通性提示）。
+
+### notify test / status
+
+```bash
+debrief notify test --json      # → {"ok":true,"schemaVersion":1,"data":{"sent":true}}
+debrief notify status --json    # → {"ok":true,"schemaVersion":1,"data":{"configured":true,"chatIdSet":true,"tokenMask":"1234…efgh"}}
+```
+
+- `test`：未配置（缺 `TELEGRAM_BOT_TOKEN` 或 `TELEGRAM_CHAT_ID`）→ `DEBRIEF_TELEGRAM_UNCONFIGURED`；已配置则发送 `✅ debrief 推送测试` + 当前时间并返回 `{"sent":bool}`。
+- `status`：只读配置状态；`tokenMask` = 首 4 位…末 4 位（仅 token 存在时；永不泄露完整 token，单边配置也给出掩码）。
+- 推送总开关：`TELEGRAM_NEWS_PUSH`（worker 新闻摘要推送）与 `TELEGRAM_REPORT_PUSH`（`report create` 复盘推送），默认均 true，`"0"/"false"/"no"` 关闭。
+
+---
+
+## 16. Decisions（设计歧义定夺记录 / Design decisions）
 
 | #   | 歧义                                                                                                    | 定夺                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | --- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -374,20 +447,28 @@ debrief worker [--dry-run] [--json]
 | 22  | slim wheel 的 FX 依赖                                                                                   | CLI 读路径（holdings/dashboard 的 CNY 汇率）需要 `adapters.fx`（requests + domain.markets）。选型：wheel 纳入 adapters 轻量子集（`__init__.py`/`base.py`/`fx.py`），保持与完整安装单一实现，不迁移 FX 代码；市场适配器仍由 worker 懒加载。缺陷复盘：初版 wheel 缺 adapters，在仓库根 cwd 下运行被源码目录 shadow 未暴露——已加「仓库外 cwd + 全新 venv 只装 wheel + PYTHONPATH 清空」的真实场景回归测试。                                                |
 | 21  | prices 采集窗口                                                                                         | 默认 `*/30 * * * *`（Asia/Shanghai，全天 48 次/天）：单一 job 覆盖美股盘后（21:30–04:00）/港股尾盘/A 股/加密全天。不做分市场窗口——collect_prices 单 job 遍历全部目标，适配器对闭市市场返回最新可得价（休市/节假日天然安全），省去四套时区窗口与节假日历复杂度；48 次/天 × 少量目标（当前 6 个）上游调用成本可忽略，`coalesce=True` + `max_instances=1` 防重叠，适配 1.6G 服务器。可经 `PRICES_CRONTAB` 环境变量或 settings 的 `prices_crontab` 键覆盖。 |
 
-## 16. 测试 / Testing
+## 17. 测试 / Testing
 
 ```bash
-~/.local/bin/uv venv -p 3.11 .venv-debrief
-~/.local/bin/uv pip install -p .venv-debrief/bin/python -e '.[dev,ui]'
-.venv-debrief/bin/python -m pytest tests/ -q        # 227 passed, 2 skipped (worker AST 扫描跳过 + Qdrant opt-in)
-.venv-debrief/bin/ruff check debrief db scheduler notifier app memory tests runtime.py server.py config.py
+cd kernel
+uv venv .venv-dev --python 3.11
+uv pip install --python .venv-dev/bin/python -e "src[collectors]" pytest
+.venv-dev/bin/python -m pytest src/tests -q
+# 全绿（除 memory_qdrant 需真实 Qdrant 的 opt-in skip；wheel 安装回归需 uv）
 ```
 
-覆盖：每命令 envelope/schema（`tests/test_debrief_cli.py`）、迁移幂等与旧库 drop 留档（`tests/test_debrief_migration.py`）、job 状态机/压缩写回/审计/目录排名（`tests/test_debrief_storage.py`）、worker 排程与故障容错（`tests/test_debrief_worker.py`）、v2 写命令成功/校验/冲突/未找到/审计（`tests/test_debrief_writes.py`）、dashboard 曲线末端钉住当前总资产与抽样（`tests/test_debrief_dashboard.py`）。测试 fixture 全部由迁移生成的种子库构造，不依赖真实数据与网络。
+覆盖：每命令 envelope/schema（`tests/test_debrief_cli.py`）、迁移幂等与旧库 drop 留档
+（`tests/test_debrief_migration.py`）、job 状态机/压缩写回/审计/目录排名
+（`tests/test_debrief_storage.py`）、worker 排程与故障容错（`tests/test_debrief_worker.py`）、
+v2 写命令成功/校验/冲突/未找到/审计（`tests/test_debrief_writes.py`）、dashboard 曲线末端钉住
+当前总资产与抽样（`tests/test_debrief_dashboard.py`）、新闻命令/实时刷新/FX/Telegram
+（`test_news_command.py`、`test_prices_refresh.py`、`test_fx_command.py`、
+`test_notify_command.py`）、wheel 打包守卫（`test_debrief_packaging.py`）。测试 fixture
+全部由迁移生成的种子库构造，不依赖真实数据与网络（packaging 的 wheel 安装回归除外）。
 
 ---
 
-## 17. v2 写命令（holdings / watchlist add|update|remove）/ v2 Write Commands
+## 18. v2 写命令（holdings / watchlist add|update|remove）/ v2 Write Commands
 
 > 白名单写（v2）：全部从 **stdin** 读取单个 JSON 对象，逐行写 `user_actions` 审计（含完整 payload）。同一进程内事务原子提交；SQLite WAL + busy timeout 处理跨进程并发。写后 `holdings`/`watchlist`/`dashboard` 立即反映。
 
@@ -459,7 +540,7 @@ echo '{"id":2}' | debrief watchlist remove --json
 
 ---
 
-## 18. 打包与分发 / Packaging & Distribution
+## 19. 打包与分发 / Packaging & Distribution
 
 ### 依赖拆分 / Dependency split
 
@@ -480,23 +561,28 @@ echo '{"id":2}' | debrief watchlist remove --json
 }
 ```
 
-### Slim CLI wheel
+### 内核 wheel（随 npm 包分发）
 
 ```bash
-# 需要 build/setuptools：uv pip install -p .venv-debrief/bin/python build 'setuptools>=68' wheel
-scripts/build_cli_wheel.sh 0.2.2
-# → artifacts/portfolio_agent_kernel-0.2.2-py3-none-any.whl（约 65KB，纯 Python）
+cd kernel/src && uv build
+# → dist/portfolio_agent_kernel-0.2.3-py3-none-any.whl
+cp dist/portfolio_agent_kernel-*.whl ../wheels/   # 旧版本轮子删除，只保留当前版本
 ```
 
-- 只含 CLI 必需模块：`debrief/ db/ common/ domain/ memory/ + config.py + adapters 轻量子集（__init__/base/fx）`；排除 `app/ scheduler/ notifier/` 与其余 adapters（重依赖面）。
-- `adapters/fx.py` 是 CLI 读路径（`holdings`/`dashboard` 的 CNY 汇率）唯一需要的适配器层（requests + domain.markets，已具备 core 依赖）；选型 = 纳入轻量子集而非迁移 FX 逻辑，保持 `adapters.fx` 与完整安装单一实现。市场适配器（us/cn/hk/crypto）仍只在 worker 运行时懒加载。
-- 验收回归：`tests/test_debrief_packaging.py::test_wheel_install_cli_works_outside_repo` 在**仓库外 cwd + 全新 venv 只装 wheel + PYTHONPATH 清空**下运行 `migrate → holdings add → holdings → dashboard → job list`，并断言 sys.path 不含仓库根（防 cwd shadow 掩盖缺模块缺陷）。
+- wheel 含全部纯 Python 模块：`debrief/ db/ common/ domain/ memory/ notifier/ scheduler/ config.py` 与
+  `adapters/` 全部适配器（news/fx/us/cn/hk/crypto）。重依赖（akshare/yfinance/apscheduler/pycoingecko）
+  只在 `collectors` extra 中声明并懒加载：CLI 读命令（含实时新闻、汇率、Telegram notify）在
+  只装 wheel 的 managed venv 中即可运行；行情实时刷新与 worker 需要 collectors。
+- 已删除的 Streamlit `app/` 代码不得回填进 wheel（`test_committed_wheel_carries_cli_surface_and_no_legacy_app` 守卫）。
+- 验收回归：`tests/test_debrief_packaging.py::test_wheel_install_cli_works_outside_repo` 在**仓库外 cwd +
+  全新 venv 只装 wheel + PYTHONPATH 清空**下运行 `migrate → holdings add → holdings → dashboard → job list`，
+  并断言 sys.path 不含仓库根（防 cwd shadow 掩盖缺模块缺陷）。
 - 轮子内含 console script `debrief`（`debrief.cli:main`）与 `collectors` extra 元数据。
-- 版本 0.2.2（与插件对齐）。
+- 版本 0.2.3（与插件对齐）。
 
 ### 铁律 / Iron rule
 
-> **wheel 内容一变就必须升版本号，禁止同版本覆盖。** uv/pip 缓存以「wheel 文件名 + 版本」为键：同名同版本覆盖后，缓存过旧包的机器 `--find-links` 会命中旧缓存装出旧内容（加 `--no-cache` 才会正确）。发布新内容 = 递增版本（0.2.0 → 0.2.1 → …），artifacts/ 只保留当前版本单文件。
+> **wheel 内容一变就必须升版本号，禁止同版本覆盖。** uv/pip 缓存以「wheel 文件名 + 版本」为键：同名同版本覆盖后，缓存过旧包的机器 `--find-links` 会命中旧缓存装出旧内容（加 `--no-cache` 才会正确）。发布新内容 = 递增版本（0.2.0 → 0.2.1 → …），`kernel/wheels/` 只保留当前版本单文件。
 
 ### 离线安装 / Offline install
 

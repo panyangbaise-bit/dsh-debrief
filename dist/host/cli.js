@@ -63,7 +63,7 @@ function runCliResolved(kernel, config, args, options) {
         let child;
         try {
             child = spawn(kernel.cliPath, [...kernel.prefixArgs, ...args, '--json'], {
-                env: resolveKernelEnv(kernel, process.env),
+                env: resolveKernelEnv(kernel, process.env, config.telegram),
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         }

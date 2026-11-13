@@ -4,6 +4,8 @@ node_modules/
 __pycache__/
 *.pyc
 .venv/
+.venv-dev/
 .pytest_cache/
 *.egg-info/
 kernel/dist/
+mock/.debrief-mock-state.json

@@ -94,10 +94,10 @@ def _fmt_date(dt) -> str:
 # ── holdings / transactions / watchlist / dashboard (thin glue) ────────────
 
 
-def cmd_holdings(session: Session, status: Optional[str]) -> dict:
+def cmd_holdings(session: Session, status: Optional[str], refresh: Optional[bool] = None) -> dict:
     if status and status not in ("open",):
         raise KernelError("DEBRIEF_ARGS", f"--status must be 'open'; got '{status}'")
-    return build_holdings_payload(session, status)
+    return build_holdings_payload(session, status, refresh=refresh)
 
 
 def cmd_transactions(
@@ -106,12 +106,114 @@ def cmd_transactions(
     return build_transactions_payload(session, ticker, limit, offset)
 
 
-def cmd_watchlist(session: Session, ticker: Optional[str]) -> dict:
-    return build_watchlist_payload(session, ticker)
+def cmd_watchlist(session: Session, ticker: Optional[str], refresh: Optional[bool] = None) -> dict:
+    return build_watchlist_payload(session, ticker, refresh=refresh)
 
 
-def cmd_dashboard(session: Session, range_days: int) -> dict:
-    return build_dashboard_payload(session, range_days)
+def cmd_dashboard(session: Session, range_days: int, refresh: Optional[bool] = None) -> dict:
+    return build_dashboard_payload(session, range_days, refresh=refresh)
+
+
+# ── news / fx / notify ──────────────────────────────────────────────────────
+
+
+def cmd_news_latest(
+    session: Session, limit: int, refresh: bool = True, notify: bool = False
+) -> dict:
+    from db.models import NewsArticle
+    from db.repository import get_recent_news
+
+    limit = max(1, min(limit, 100))
+    fetched, new_count, new_items = False, 0, []
+    if refresh:
+        try:
+            from debrief.worker import collect_news
+
+            result = collect_news(session)
+            fetched = True
+            new_count = int(result.get("saved") or 0)
+            new_items = list(result.get("items") or [])
+        except Exception:
+            fetched, new_count, new_items = False, 0, []
+    rows = get_recent_news(session, limit=limit)
+    items = [
+        {
+            "id": article.id,
+            "title": article.headline,
+            "source": article.source,
+            "url": article.url,
+            "summary": article.summary,
+            "publishedAt": _fmt_time(article.published_at),
+        }
+        for article in rows
+    ]
+    payload = {
+        "items": items,
+        "total": session.query(NewsArticle).count(),
+        "fetched": fetched,
+        "newCount": new_count,
+        "asOf": display_now(),
+        "notified": False,
+    }
+    if notify and new_count > 0:
+        try:
+            from notifier.telegram import is_configured, notify_news_digest
+
+            if is_configured():
+                payload["notified"] = bool(notify_news_digest(new_items, count=new_count))
+        except Exception:
+            payload["notified"] = False
+    return payload
+
+
+def cmd_fx(base: str) -> dict:
+    from adapters.fx import get_rates
+
+    try:
+        return get_rates(base)
+    except Exception as exc:
+        raise KernelError(
+            "DEBRIEF_FX_UNAVAILABLE",
+            "no FX rates from open.er-api.com for base '"
+            + str(base or "CNY").upper()
+            + f"' ({exc}); set DEBRIEF_FX_<CCY>=<CNY per CCY> env overrides"
+            " (e.g. DEBRIEF_FX_USD=7.2) or check connectivity",
+        ) from None
+
+
+def cmd_notify_test() -> dict:
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    from common.time import format_display_time
+    from notifier.telegram import is_configured, notify
+
+    if not is_configured():
+        raise KernelError(
+            "DEBRIEF_TELEGRAM_UNCONFIGURED",
+            "未配置 Telegram：请设置 TELEGRAM_BOT_TOKEN 与 TELEGRAM_CHAT_ID"
+            "（插件 Config.telegram.botToken/chatId 或内核环境变量）",
+        )
+    now = format_display_time(_dt.now(_tz.utc))
+    return {"sent": bool(notify(f"✅ <b>debrief 推送测试</b>\n<code>{now}</code>"))}
+
+
+def cmd_notify_status() -> dict:
+    from config import config
+
+    token = config.TELEGRAM_BOT_TOKEN or ""
+    chat_id = config.TELEGRAM_CHAT_ID or ""
+    token_mask = None
+    if token:
+        if len(token) <= 8:
+            token_mask = f"{token[0]}…{token[-1]}" if len(token) > 1 else "…"
+        else:
+            token_mask = f"{token[:4]}…{token[-4:]}"
+    return {
+        "configured": bool(token and chat_id),
+        "chatIdSet": bool(chat_id),
+        "tokenMask": token_mask,
+    }
 
 
 # ── instruments ────────────────────────────────────────────────────────────
@@ -247,7 +349,20 @@ def cmd_report_create(session: Session, payload: dict) -> dict:
         target_id=report_id,
         notes=title,
     )
-    return {"id": report_id, "status": job_status}
+    notified = False
+    try:
+        from config import config
+        from notifier.telegram import is_configured, notify
+
+        if config.TELEGRAM_REPORT_PUSH and is_configured():
+            notified = bool(
+                notify(
+                    f"📋 <b>复盘报告 · {market_to_output(market_db)}</b>\n{title}\n\n{summary}"
+                )
+            )
+    except Exception:
+        notified = False
+    return {"id": report_id, "status": job_status, "notified": notified}
 
 
 # ── memory ─────────────────────────────────────────────────────────────────
@@ -685,7 +800,9 @@ def cmd_memory_add(session: Session, payload: dict) -> dict:
 # ── analysis prepare ───────────────────────────────────────────────────────
 
 
-def cmd_analysis_prepare(session: Session, market: str) -> dict:
+def cmd_analysis_prepare(
+    session: Session, market: str, refresh: Optional[bool] = None
+) -> dict:
     from db.repository import create_job_run
 
     market_db = normalize_market_db(market)
@@ -703,6 +820,27 @@ def cmd_analysis_prepare(session: Session, market: str) -> dict:
 
     from db.models import Holding
     from db.repository import get_recent_news
+
+    # Refresh quotes for this market's holdings + watchlist before quoting.
+    refresh_meta = {"pricesRefreshed": False}
+    if refresh is not False:
+        from debrief.kernel import _refresh_meta
+
+        targets = {
+            (market_db, holding.ticker.upper())
+            for holding in session.scalars(
+                select(Holding).where(Holding.status == "open", Holding.market == market_db)
+            ).all()
+        }
+        targets |= {
+            (market_db, item.ticker.upper())
+            for item in session.scalars(
+                select(WatchlistItem).where(
+                    WatchlistItem.status != "archived", WatchlistItem.market == market_db
+                )
+            ).all()
+        }
+        refresh_meta = _refresh_meta(refresh, session, targets)
 
     quotes = []
     seen = set()
@@ -766,6 +904,7 @@ def cmd_analysis_prepare(session: Session, market: str) -> dict:
         "jobId": run.id,
         "inputs": {"quotes": quotes, "news": news, "memoryCandidates": candidates},
         "guidance": guidance,
+        **refresh_meta,
     }
 
 

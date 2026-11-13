@@ -69,6 +69,21 @@ class Config:
     TELEGRAM_CHAT_ID: str = os.environ.get("TELEGRAM_CHAT_ID", "")
     TELEGRAM_POLL_TIMEOUT: int = int(os.environ.get("TELEGRAM_POLL_TIMEOUT", "30"))
     TELEGRAM_POLL_MAX_BACKOFF: int = int(os.environ.get("TELEGRAM_POLL_MAX_BACKOFF", "60"))
+    # Automatic push switches (opt-out via env).
+    TELEGRAM_NEWS_PUSH: bool = os.environ.get("TELEGRAM_NEWS_PUSH", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    TELEGRAM_REPORT_PUSH: bool = os.environ.get("TELEGRAM_REPORT_PUSH", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    # A PriceCache row is considered stale for on-read refresh when fetched_at
+    # is NULL or older than this many seconds.
+    PRICE_STALE_SECONDS: int = max(10, int(os.environ.get("PRICE_STALE_SECONDS", "120")))
 
     # Display / logging timezone (DB timestamps stay UTC; UI converts for display).
     # Default Beijing time. Override with e.g. APP_TIMEZONE=America/New_York

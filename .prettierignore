@@ -3,3 +3,4 @@ dist
 package-lock.json
 CHANGELOG.md
 mock/.debrief-mock-state.json
+kernel/.venv-dev

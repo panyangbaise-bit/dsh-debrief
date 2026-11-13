@@ -160,6 +160,33 @@ describe('kernel subprocess environment', () => {
       DATABASE_URL: 'sqlite:////server/db',
     })
   })
+
+  it('overlays non-empty telegram credentials as TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID', () => {
+    expect(resolveKernelEnv(managed, { PATH: '/usr/bin' }, { botToken: '123:abc', chatId: '42' })).toEqual({
+      PATH: '/usr/bin',
+      DATABASE_URL: 'sqlite:////tmp/data/portfolio.db',
+      TELEGRAM_BOT_TOKEN: '123:abc',
+      TELEGRAM_CHAT_ID: '42',
+    })
+    // Partial config overlays only the provided value.
+    expect(resolveKernelEnv(managed, { PATH: '/usr/bin' }, { botToken: '123:abc' })).toEqual({
+      PATH: '/usr/bin',
+      DATABASE_URL: 'sqlite:////tmp/data/portfolio.db',
+      TELEGRAM_BOT_TOKEN: '123:abc',
+    })
+  })
+
+  it('never wipes existing env telegram values when config omits or empties them', () => {
+    const env = { TELEGRAM_BOT_TOKEN: 'keep-me', TELEGRAM_CHAT_ID: '9' }
+    expect(resolveKernelEnv(managed, env)).toEqual({
+      ...env,
+      DATABASE_URL: 'sqlite:////tmp/data/portfolio.db',
+    })
+    expect(resolveKernelEnv(managed, env, { botToken: '', chatId: undefined })).toEqual({
+      ...env,
+      DATABASE_URL: 'sqlite:////tmp/data/portfolio.db',
+    })
+  })
 })
 
 describe('wheel directory resolution', () => {

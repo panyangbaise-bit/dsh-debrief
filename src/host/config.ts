@@ -21,6 +21,8 @@ export interface DebriefConfig {
   enableSetup?: boolean
   /** Whether to register the read-only portfolio JSON route (default true). */
   enableDashboardRoute?: boolean
+  /** Optional Telegram bot credentials for the notify bridge and news pushes. */
+  telegram?: { botToken?: string; chatId?: string }
 }
 
 export function normalizeConfig(raw: Partial<DebriefConfig> | undefined, env: NodeJS.ProcessEnv): DebriefConfig {
@@ -39,5 +41,9 @@ export function normalizeConfig(raw: Partial<DebriefConfig> | undefined, env: No
     timeoutMs: Number.isFinite(timeoutMs) ? Math.max(1000, timeoutMs) : 15000,
     enableSetup: raw?.enableSetup ?? true,
     enableDashboardRoute: raw?.enableDashboardRoute ?? true,
+    telegram:
+      raw?.telegram && (typeof raw.telegram.botToken === 'string' || typeof raw.telegram.chatId === 'string')
+        ? { botToken: raw.telegram.botToken, chatId: raw.telegram.chatId }
+        : undefined,
   }
 }

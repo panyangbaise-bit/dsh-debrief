@@ -78,6 +78,7 @@ class PriceCache(Base):
     close: Mapped[float] = mapped_column(Float, nullable=False)
     volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(30), nullable=False)
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self):
         return f"<PriceCache(ticker='{self.ticker}', date={self.date})>"

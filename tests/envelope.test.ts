@@ -156,6 +156,39 @@ describe('render models (card fallback path)', () => {
     expect(result.ok).toBe(true)
   })
 
+  it('accepts the vNext dashboard payload with fx, pricesRefreshed, priceErrors, and per-row currency', () => {
+    const payload = {
+      kpis: { totalAssets: 1234567, currency: 'CNY' },
+      fx: {
+        base: 'CNY',
+        asOf: '2026-11-13T12:00:00Z',
+        rates: { CNY: 1, USD: 0.1392, HKD: 1.08, EUR: 0.128 },
+        source: 'open.er-api.com',
+      },
+      pricesRefreshed: true,
+      priceErrors: ['NVDA: quote timeout'],
+      holdings: [{ symbol: 'AAPL', name: '苹果', market: 'US', currency: 'USD' }],
+      watchlist: [{ symbol: 'NVDA', name: '英伟达', market: 'US', currency: 'USD' }],
+    }
+    const result = renderModel('debrief_dashboard', payload)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const fx = result.model.fx as Record<string, unknown>
+      expect(fx.base).toBe('CNY')
+      expect(result.model.pricesRefreshed).toBe(true)
+      expect(result.model.priceErrors).toEqual(['NVDA: quote timeout'])
+      expect((result.model.holdings as Array<Record<string, unknown>>)[0].currency).toBe('USD')
+      expect((result.model.watchlist as Array<Record<string, unknown>>)[0].currency).toBe('USD')
+    }
+  })
+
+  it('accepts a dashboard payload whose fx is null (FX unavailable)', () => {
+    const payload = { kpis: { totalAssets: 1 }, fx: null }
+    const result = renderModel('debrief_dashboard', payload)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.model.fx).toBeNull()
+  })
+
   it('degrades (never crashes) on a malformed dashboard payload', () => {
     const result = renderModel('debrief_dashboard', { kpis: { totalAssets: 'not-a-number' } })
     expect(result.ok).toBe(false)
@@ -183,6 +216,7 @@ describe('render models lose no fields (regression: blank dashboard tables)', ()
     marketValue: 282400,
     pnlPct: -2.62,
     weight: 21,
+    currency: 'CNY',
   }
   const fullWatchRow = {
     market: 'US',
@@ -193,6 +227,7 @@ describe('render models lose no fields (regression: blank dashboard tables)', ()
     targetPrice: 105.0,
     distancePct: 12.6,
     alert: true,
+    currency: 'USD',
   }
 
   it('debrief_holdings output deep-equals input', () => {

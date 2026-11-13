@@ -9,6 +9,32 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Live news read path** — the kernel gains the missing `news latest` command
+  (the `debrief_news` tool previously targeted a nonexistent CLI subcommand and
+  always returned `DEBRIEF_USAGE`). `news latest` fetches WallStreetCN live,
+  persists new items (headline-deduped) and returns the latest batch; the tool
+  exposes `limit`, `refresh` (default true; `refresh:false` maps to
+  `--no-refresh`) and `notify` (pushes new items to Telegram via `--notify`).
+- **Real-time quotes on read** — `holdings` / `watchlist` / `dashboard` /
+  `analysis prepare` refresh stale quotes live by default (new
+  `price_cache.fetched_at` column + migration v14; stale = older than
+  `PRICE_STALE_SECONDS`, default 120 s); `--refresh` forces a full refresh,
+  `--no-refresh` reads the cache only. Without the collectors extra the kernel
+  degrades silently to cached prices. Payloads carry `pricesRefreshed` /
+  `priceErrors` and every position/watchlist row carries its `currency`.
+- **Currency units + display-currency switcher** — the Portfolio page labels
+  holding/watchlist prices with their native currency (CN stocks and funds CNY,
+  US and crypto USD, HK HKD) and adds CNY/USD/HKD chips that convert total
+  assets, P&L and the equity chart via the free open.er-api.com feed; the
+  dashboard payload embeds an `fx` block (null on provider failure → CNY only)
+  and the kernel exposes `debrief fx [--base X]`.
+- **Telegram pushes (send-only)** — reports push when `report create` writes
+  them back, news pushes when the worker collects new items (both toggleable
+  via `TELEGRAM_REPORT_PUSH` / `TELEGRAM_NEWS_PUSH`); new `debrief notify
+  status|test` command and a `debrief_telegram` tool; plugin Config gains
+  `telegram.botToken` / `telegram.chatId` which are injected into every kernel
+  subprocess.
+
 - Self-contained kernel distribution: `kernel/wheels/` bundles the slim kernel
   wheel (`portfolio_agent_kernel-0.2.0-py3-none-any.whl`) plus its offline
   dependency closure (sqlalchemy/requests/python-dotenv/certifi/

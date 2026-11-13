@@ -8,16 +8,16 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from db.models import Holding, NewsArticle, WatchlistItem
+from db.models import Holding, NewsArticle, PriceCache, WatchlistItem
 from debrief.retention import cleanup_job_runs
 
 logger = logging.getLogger(__name__)
@@ -169,16 +169,18 @@ def collect_prices(session: Session) -> dict:
 
 def collect_news(session: Session) -> dict:
     from adapters.news import WallStreetCNAdapter
+    from config import config
     from db.repository import save_news_article
 
     adapter = WallStreetCNAdapter()
     items = adapter.get_latest_news(limit=20)
     known = {headline for (headline,) in session.execute(select(NewsArticle.headline))}
     saved = 0
+    saved_articles = []
     for item in items:
         if not item.get("title") or item["title"] in known:
             continue
-        save_news_article(
+        article = save_news_article(
             session,
             headline=item["title"],
             source="wallstreetcn",
@@ -188,7 +190,107 @@ def collect_news(session: Session) -> dict:
         )
         known.add(item["title"])
         saved += 1
-    return {"fetched": len(items), "saved": saved}
+        saved_articles.append(article)
+    notified = False
+    if saved and config.TELEGRAM_NEWS_PUSH:
+        try:
+            from notifier.telegram import is_configured, notify_news_digest
+
+            if is_configured():
+                notified = bool(notify_news_digest(saved_articles, count=saved))
+        except Exception:
+            notified = False
+    return {
+        "fetched": len(items),
+        "saved": saved,
+        "notified": notified,
+        "items": saved_articles,
+    }
+
+
+def refresh_stale_prices(session: Session, targets, force: bool = False) -> dict:
+    """Refresh quotes for stale or forced (market, ticker) targets.
+
+    Adapter calls run in worker threads (Session is not thread-safe — each
+    thread only calls the adapter); upserts happen sequentially in the
+    caller's thread afterwards. Never raises: a missing collectors install
+    degrades to cached prices (available=False).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from config import config
+    from db.repository import upsert_price
+
+    targets = sorted({(str(m).upper(), str(t).upper()) for m, t in targets})
+    if not targets:
+        return {"refreshed": 0, "failed": [], "available": True}
+    try:
+        registry = _register_adapters()
+    except (ModuleNotFoundError, ImportError, RuntimeError):
+        return {"refreshed": 0, "failed": [], "available": False}
+
+    # SQLite returns naive datetimes — compare against naive UTC.
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        seconds=config.PRICE_STALE_SECONDS
+    )
+    stale_targets = []
+    for market, ticker in targets:
+        if force:
+            stale_targets.append((market, ticker))
+            continue
+        latest = session.scalars(
+            select(PriceCache)
+            .where(PriceCache.market == market, PriceCache.ticker == ticker)
+            .order_by(desc(PriceCache.date), desc(PriceCache.id))
+            .limit(1)
+        ).first()
+        # No row at all → also stale (a freshly added holding must get its
+        # first live quote on the next read, not wait for the cron job).
+        if latest is None or latest.fetched_at is None or latest.fetched_at < cutoff:
+            stale_targets.append((market, ticker))
+
+    def fetch(market_ticker):
+        market, ticker = market_ticker
+        try:
+            adapter = registry.get(market)
+            quote = adapter.get_price(ticker)
+        except Exception as exc:
+            return (market, ticker, None, "", f"{market}:{ticker}:{type(exc).__name__}")
+        price = quote.get("price") if isinstance(quote, dict) else None
+        if price is None:
+            return (market, ticker, None, "", f"{market}:{ticker}:no-price")
+        try:
+            price = float(price)
+        except (TypeError, ValueError):
+            return (market, ticker, None, "", f"{market}:{ticker}:bad-price")
+        return (market, ticker, price, quote.get("source", "") or "adapter", None)
+
+    results = []
+    if stale_targets:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(fetch, stale_targets))
+
+    refreshed, failed = 0, []
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    fetched_now = datetime.now(timezone.utc)
+    for market, ticker, price, source, error in results:
+        if error:
+            failed.append(error)
+            continue
+        try:
+            upsert_price(
+                session,
+                ticker,
+                market,
+                today,
+                price,
+                source=source,
+                fetched_at=fetched_now,
+            )
+            refreshed += 1
+        except Exception:
+            failed.append(f"{market}:{ticker}:persist-error")
+    return {"refreshed": refreshed, "failed": failed, "available": True}
 
 
 def _parse_published(value):
