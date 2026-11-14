@@ -71,8 +71,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
-- 美股备用源不含 OTC/粉单市场（Nasdaq Trader 只覆盖 NASDAQ/NYSE/AMEX/Arca）；
-  `SPCX` 这类粉单标的需要靠实时 suggest 才能搜到。
+- 美股备用源只覆盖 NASDAQ/NYSE/AMEX/Arca（Nasdaq Trader 目录不含 OTC/粉单），
+  粉单标的仍需实时 suggest 才能搜到；本机的 `SPCX` 在主目录里，不受影响。
 
 ### Performance
 
