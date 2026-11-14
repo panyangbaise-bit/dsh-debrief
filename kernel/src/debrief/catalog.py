@@ -331,7 +331,22 @@ def sync_coin_list(session: Session, limit: int = 2000) -> int:
     return _upsert_rows(session, rows)
 
 
-def _akshare_rows(loader, market: str, currency: str, kind: str, limit: int):
+def _akshare_rows(
+    loader,
+    market: str,
+    currency: str,
+    kind: str,
+    limit: int,
+    code_col: Optional[str] = None,
+    name_col: Optional[str] = None,
+    strip_prefix: bool = False,
+):
+    """Normalize one akshare frame into catalog rows.
+
+    `code_col`/`name_col` cover sources whose headers differ (exchange-published
+    lists use 证券代码/证券简称, 深交所 uses A股代码/A股简称, sina prefixes ETF
+    codes with sh/sz). Anything unparsable is skipped rather than stored.
+    """
     import akshare as ak
 
     df = loader(ak)
@@ -340,9 +355,17 @@ def _akshare_rows(loader, market: str, currency: str, kind: str, limit: int):
     rows = []
     for _, rec in df.head(limit).iterrows():
         values = rec.to_dict()
-        code = str(values.get("代码") or values.get("code") or values.get("基金代码") or "").strip()
-        name = str(values.get("名称") or values.get("name") or values.get("基金简称") or "").strip()
-        if not code or not name:
+        if code_col is not None:
+            code = str(values.get(code_col) or "").strip()
+        else:
+            code = str(values.get("代码") or values.get("code") or values.get("基金代码") or "").strip()
+        if name_col is not None:
+            name = str(values.get(name_col) or "").strip()
+        else:
+            name = str(values.get("名称") or values.get("name") or values.get("基金简称") or "").strip()
+        if strip_prefix and len(code) > 6 and code[:2].lower() in {"sh", "sz", "bj"}:
+            code = code[2:]
+        if not code or not name or code.lower() == "nan" or name.lower() == "nan":
             continue
         alias = ""
         for key in ("拼音缩写", "拼音简称", "拼音"):
@@ -362,6 +385,59 @@ def _akshare_rows(loader, market: str, currency: str, kind: str, limit: int):
     return rows
 
 
+def _cn_stock_rows(limit: int) -> list[dict]:
+    """A-share list: eastmoney, then the exchange-published lists.
+
+    eastern money's full-board endpoint (`stock_info_a_code_name`) is the
+    richest source but is routinely reset/throttled from a cloud IP; the SSE
+    and SZSE sites serve the same codes from different hosts, so a throttled
+    eastmoney leaves the catalog empty unless we fall back.
+    """
+    try:
+        rows = _akshare_rows(lambda ak: ak.stock_info_a_code_name(), "CN", "CNY", "stock", limit)
+        if rows:
+            return rows
+        logger.warning("catalog: eastmoney A-share list returned no rows; using exchange lists")
+    except Exception as exc:
+        logger.warning("catalog: eastmoney A-share list failed (%s); using exchange lists", exc)
+    rows: list[dict] = []
+    for label, loader, code_col, name_col in (
+        ("SSE 主板", lambda ak: ak.stock_info_sh_name_code(symbol="主板A股"), "证券代码", "证券简称"),
+        ("SSE 科创板", lambda ak: ak.stock_info_sh_name_code(symbol="科创板"), "证券代码", "证券简称"),
+        ("SZSE A股", lambda ak: ak.stock_info_sz_name_code(symbol="A股列表"), "A股代码", "A股简称"),
+    ):
+        try:
+            rows.extend(_akshare_rows(loader, "CN", "CNY", "stock", limit, code_col, name_col))
+        except Exception as exc:
+            logger.warning("catalog: %s list failed: %s", label, exc)
+    return rows
+
+
+def _cn_etf_rows(limit: int) -> list[dict]:
+    """Exchange-traded fund list: eastmoney push2, then sina's ETF board."""
+    try:
+        rows = _akshare_rows(lambda ak: ak.fund_etf_spot_em(), "CN", "CNY", "etf", limit)
+        if rows:
+            return rows
+        logger.warning("catalog: eastmoney ETF list returned no rows; using sina")
+    except Exception as exc:
+        logger.warning("catalog: eastmoney ETF list failed (%s); using sina", exc)
+    try:
+        return _akshare_rows(
+            lambda ak: ak.fund_etf_category_sina(symbol="ETF基金"),
+            "CN",
+            "CNY",
+            "etf",
+            limit,
+            "代码",
+            "名称",
+            strip_prefix=True,
+        )
+    except Exception as exc:
+        logger.warning("catalog: sina ETF list failed: %s", exc)
+        return []
+
+
 # Open-end funds (场外基金) are ~28k codes today and akshare returns them
 # sorted by code, so any cap below that silently hides every 01xxxx/02xxxx
 # fund — including most ETF feeder funds launched after 2024.
@@ -372,8 +448,8 @@ def sync_stock_catalog(session: Session) -> dict:
     """Daily full sync: CN A股 + CN ETF/基金 + HK + US (best-effort per source)."""
     stats = {}
     sources = (
-        ("cn_stock", lambda: _akshare_rows(lambda ak: ak.stock_info_a_code_name(), "CN", "CNY", "stock", 6000)),
-        ("cn_etf", lambda: _akshare_rows(lambda ak: ak.fund_etf_spot_em(), "CN", "CNY", "etf", 1500)),
+        ("cn_stock", lambda: _cn_stock_rows(6000)),
+        ("cn_etf", lambda: _cn_etf_rows(2000)),
         ("cn_fund", lambda: _akshare_rows(lambda ak: ak.fund_name_em(), "CN", "CNY", "fund", FUND_SYNC_LIMIT)),
         ("hk_stock", lambda: _akshare_rows(lambda ak: ak.stock_hk_spot_em(), "HK", "HKD", "stock", 4000)),
         ("us_stock", lambda: _akshare_rows(lambda ak: ak.stock_us_spot_em(), "US", "USD", "stock", 8000)),

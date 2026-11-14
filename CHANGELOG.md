@@ -36,6 +36,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ~1.5 s eastmoney round-trip; the live fallback still covers names and
   instruments the catalog does not know.
 
+- **目录同步不再因东财限流而整类缺失** — 06:10 的 `catalog-sync` 里
+  `cn_stock`（连接重置）、`cn_etf`（502）、`hk_stock`/`us_stock`（push2 限流）
+  长期全部失败，本地目录此前只有基金和加密两类，股票/ETF 搜索只能靠 1–2 s 的
+  实时 suggest。A 股与 ETF 现在各有备用源：A 股列表失败时改用上交所
+  （主板 + 科创板）与深交所官方名单（实测 5 579 条，含北交所 920xxx），
+  ETF 失败时改用新浪 ETF 榜（927 条，自动去掉 sh/sz 前缀）。
+  港股/美股仍只有东财一个源，失败时回退实时 suggest（未变）。
+
+### Known limitations
+
+- CN 代码段存在真实歧义：`000001` 既是平安银行（深市股票）也是华夏成长混合
+  （场外基金），而目录以 `(market, symbol)` 唯一。当前同步顺序让基金胜出
+  （约 1 000 个 000/001/002/003 深市股票被同名基金覆盖），`resolve_cn_symbol`
+  对这些裸码本来就要求 `stock:` / `fund:` 前缀。彻底修复需要把目录主键扩成
+  `(market, symbol, asset_class)` 并让选择器输出带前缀的 symbol，属于后续工作。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

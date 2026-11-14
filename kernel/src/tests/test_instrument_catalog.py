@@ -149,3 +149,69 @@ def test_name_query_with_few_matches_still_consults_the_suggest(db, monkeypatch)
     with Session(db) as session:
         search(session, "CN", "科创")
     assert calls  # no exact code match, so the live fallback is still used
+
+
+def test_cn_stock_falls_back_to_exchange_lists(monkeypatch):
+    """A throttled eastmoney endpoint must not leave the A-share list empty."""
+    import debrief.catalog as catalog
+
+    calls = []
+    row = {
+        "market": "CN",
+        "symbol": "600000",
+        "name": "浦发银行",
+        "currency": "CNY",
+        "asset_class": "stock",
+        "pinyin_alias": None,
+    }
+
+    def fake_rows(loader, market, currency, kind, limit, code_col=None, name_col=None, strip_prefix=False):
+        calls.append(code_col)
+        if code_col is None:
+            raise ConnectionResetError("eastmoney reset")
+        return [dict(row)]
+
+    monkeypatch.setattr(catalog, "_akshare_rows", fake_rows)
+    rows = catalog._cn_stock_rows(100)
+    assert calls == [None, "证券代码", "证券代码", "A股代码"]
+    assert len(rows) == 3  # SSE 主板 + SSE 科创板 + SZSE
+
+
+def test_cn_etf_falls_back_to_sina_with_prefixed_codes(monkeypatch):
+    import debrief.catalog as catalog
+
+    calls = []
+
+    def fake_rows(loader, market, currency, kind, limit, code_col=None, name_col=None, strip_prefix=False):
+        calls.append((code_col, strip_prefix))
+        if code_col is None:
+            raise RuntimeError("502 from push2")
+        return [
+            {
+                "market": "CN",
+                "symbol": "510300",
+                "name": "沪深300ETF",
+                "currency": "CNY",
+                "asset_class": "etf",
+                "pinyin_alias": None,
+            }
+        ]
+
+    monkeypatch.setattr(catalog, "_akshare_rows", fake_rows)
+    rows = catalog._cn_etf_rows(100)
+    assert calls == [(None, False), ("代码", True)]
+    assert rows[0]["symbol"] == "510300"
+
+
+def test_akshare_rows_strips_exchange_prefixes_and_skips_nan():
+    pandas = pytest.importorskip("pandas")
+    from debrief.catalog import _akshare_rows
+
+    frame = pandas.DataFrame(
+        {
+            "代码": ["sh510300", "sz159998", None, "510500"],
+            "名称": ["沪深300ETF", "计算机ETF", None, "中证500ETF"],
+        }
+    )
+    rows = _akshare_rows(lambda ak: frame, "CN", "CNY", "etf", 100, "代码", "名称", strip_prefix=True)
+    assert [row["symbol"] for row in rows] == ["510300", "159998", "510500"]
