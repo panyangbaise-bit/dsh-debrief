@@ -102,6 +102,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   写入新的买入流水（notes=`reopen`），审计记为 `holding.add / reopen …`；
   真正还有持仓的重复添加仍然返回冲突。
 
+### Added
+
+- **涨跌配色开关** — 投资组合页头部新增「绿涨红跌 / 红涨绿跌」切换（与国际/ A股
+  两种习惯对齐，选择存 localStorage 跨刷新保留，默认红涨绿跌，与插件原配色一致）。
+- **收益数值着色** — 今日收益、总收益、年化收益，以及持仓盈亏%、自选涨跌%、
+  图表末端标签，统一按涨跌染色；颜色按数额符号判定（为零才退回百分比），
+  页面级 CSS 变量 `--dbr-up/--dbr-down` 由配色开关整体切换。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

@@ -121,6 +121,9 @@ const zh = {
     'page.addComing': '添加持仓 / 自选将在 v2 提供（走 DSH 确认流）',
     'page.refreshed': '更新于 {time}',
     'page.currency': '显示币种',
+    'page.tint': '涨跌配色',
+    'tint.greenUp': '绿涨红跌',
+    'tint.redUp': '红涨绿跌',
     'page.fxRate': '1 CNY ≈ {rate} {ccy} · 汇率更新 {time}',
     'page.fxMissing': '汇率暂不可用，仅按人民币显示',
     'page.kpiTotalAssets': '总资产',
@@ -304,6 +307,9 @@ const en = {
     'page.addComing': 'Adding holdings / watchlist arrives in v2 (DSH confirmation flow)',
     'page.refreshed': 'Updated {time}',
     'page.currency': 'Display currency',
+    'page.tint': 'Gain/loss colours',
+    'tint.greenUp': 'Green up',
+    'tint.redUp': 'Red up',
     'page.fxRate': '1 CNY ≈ {rate} {ccy} · FX updated {time}',
     'page.fxMissing': 'FX unavailable, showing CNY only',
     'page.kpiTotalAssets': 'Total assets',
@@ -665,6 +671,8 @@ function clientFactory(requireFn) {
 .dbr-body{border-top:.5px solid var(--dsw-alias-border-l1);padding:10px 12px 12px;min-width:0}
 .dbr-card.closed .dbr-body{display:none}
 .dbr-up{color:var(--dbr-up)} .dbr-down{color:var(--dbr-down)}
+.dbr-page{--dbr-up:light-dark(#d5433b,#e5534b);--dbr-down:light-dark(#0f9d58,#2ea870)}
+.dbr-page.dbr-tint-green-up{--dbr-up:light-dark(#0f9d58,#2ea870);--dbr-down:light-dark(#d5433b,#e5534b)}
 .dbr-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:8px;margin-bottom:10px}
 .dbr-stat{background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius-sm);padding:7px 10px;min-width:0}
 .dbr-k{font-size:11px;color:var(--dsw-alias-label-secondary)}
@@ -812,6 +820,19 @@ function clientFactory(requireFn) {
             return '';
         return value > 0 ? 'dbr-up' : value < 0 ? 'dbr-down' : '';
     }
+    /** Gain/loss palette: red-up (A-share convention) or green-up (US convention). */
+    const TINTS = ['green-up', 'red-up'];
+    const TINT_STORAGE = 'dsh-debrief.tint';
+    const tintKey = (value) => (value === 'green-up' ? 'tint.greenUp' : 'tint.redUp');
+    function loadTint() {
+        try {
+            const saved = window.localStorage.getItem(TINT_STORAGE);
+            return saved === 'green-up' || saved === 'red-up' ? saved : 'red-up';
+        }
+        catch {
+            return 'red-up';
+        }
+    }
     function marketName(t, market) {
         const key = String(market ?? '').toUpperCase();
         return t(`mkt.${key.toLowerCase()}`) === `mkt.${key.toLowerCase()}`
@@ -880,7 +901,7 @@ function clientFactory(requireFn) {
         return h('div', { className: 'dbr-err' }, h('span', { className: 'dbr-code' }, props.error.code), h('span', null, explanation !== '' ? explanation : props.error.message), h('span', { className: 'dbr-hint', style: { marginTop: 0 } }, `（${props.t('common.retryHint')}）`));
     }
     function Stat(props) {
-        return h('div', { className: 'dbr-stat' }, h('div', { className: 'dbr-k' }, props.k), h('div', { className: 'dbr-v' }, props.v, props.d !== undefined ? h('span', { className: 'dbr-d ' + (props.cls ?? '') }, props.d) : null));
+        return h('div', { className: 'dbr-stat' }, h('div', { className: 'dbr-k' }, props.k), h('div', { className: 'dbr-v' + (props.cls ? ' ' + props.cls : '') }, props.v, props.d !== undefined ? h('span', { className: 'dbr-d ' + (props.cls ?? '') }, props.d) : null));
     }
     function useInView() {
         const ref = React.useRef(null);
@@ -1276,13 +1297,13 @@ function clientFactory(requireFn) {
             k: t('dashboard.dayPnl'),
             v: money(kpis.dayPnl),
             d: pct(kpis.dayPnlPct),
-            cls: updown(kpis.dayPnlPct),
+            cls: updown(kpis.dayPnl) || updown(kpis.dayPnlPct),
         }), h(Stat, {
             k: t('dashboard.totalPnl'),
             v: money(kpis.totalPnl),
             d: pct(kpis.totalPnlPct),
-            cls: updown(kpis.totalPnlPct),
-        }), h(Stat, { k: t('dashboard.annualPct'), v: pct(kpis.annualPct) })), h('div', { className: 'dbr-sec-title' }, t('dashboard.equity')), equity.length > 1
+            cls: updown(kpis.totalPnl) || updown(kpis.totalPnlPct),
+        }), h(Stat, { k: t('dashboard.annualPct'), v: pct(kpis.annualPct), cls: updown(kpis.annualPct) })), h('div', { className: 'dbr-sec-title' }, t('dashboard.equity')), equity.length > 1
             ? h('div', { className: 'dbr-chart' }, areaSvg({ points: equity, fmtLabel: (v) => money(v), t }))
             : null, h('div', { className: 'dbr-sec-title', style: { marginTop: 10 } }, t('dashboard.returns')), returns.length > 1
             ? h('div', { className: 'dbr-chart' }, areaSvg({
@@ -1620,6 +1641,7 @@ function clientFactory(requireFn) {
         const t = pickT(props.t);
         const [range, setRange] = React.useState('90');
         const [ccy, setCcy] = React.useState('CNY');
+        const [tint, setTint] = React.useState(loadTint);
         const cachedInitial = rangeCache.get('90');
         const [state, setState] = React.useState(cachedInitial !== undefined && Date.now() - cachedInitial.at < RANGE_CACHE_MS
             ? { status: 'ready', data: cachedInitial.data, error: null }
@@ -1628,6 +1650,14 @@ function clientFactory(requireFn) {
         const [attempt, setAttempt] = React.useState(0);
         const [modal, setModal] = React.useState(null);
         const [toast, setToast] = React.useState(null);
+        React.useEffect(() => {
+            try {
+                window.localStorage.setItem(TINT_STORAGE, tint);
+            }
+            catch {
+                /* private mode: keep the choice for this session only */
+            }
+        }, [tint]);
         React.useEffect(() => {
             if (toast === null)
                 return;
@@ -1724,7 +1754,7 @@ function clientFactory(requireFn) {
             const parsed = typeof asOf === 'string' ? new Date(asOf) : null;
             return parsed !== null && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString('zh-CN') : null;
         })();
-        return h('div', { className: 'dbr-page' }, h('div', { className: 'dbr-page-head' }, h('div', { className: 'dbr-page-title' }, t('page.panel')), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('dashboard.range', { range: '' }) }, RANGES.map((value) => h('button', {
+        return h('div', { className: 'dbr-page' + (tint === 'green-up' ? ' dbr-tint-green-up' : '') }, h('div', { className: 'dbr-page-head' }, h('div', { className: 'dbr-page-title' }, t('page.panel')), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('dashboard.range', { range: '' }) }, RANGES.map((value) => h('button', {
             type: 'button',
             key: value,
             className: 'dbr-chip' + (value === range ? ' active' : ''),
@@ -1736,7 +1766,13 @@ function clientFactory(requireFn) {
             className: 'dbr-chip' + (value === activeCcy ? ' active' : ''),
             'aria-pressed': value === activeCcy,
             onClick: () => setCcy(value),
-        }, value))), h('div', { className: 'dbr-page-meta', role: 'status', 'aria-live': 'polite' }, fetching ? h('span', { className: 'dbr-updating' }, t('dashboard.updating')) : null, priceTime !== null ? h('span', null, t('dashboard.pricesAsOf', { time: priceTime })) : null)), state.status === 'loading'
+        }, value))), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('page.tint') }, TINTS.map((value) => h('button', {
+            type: 'button',
+            key: value,
+            className: 'dbr-chip' + (value === tint ? ' active' : ''),
+            'aria-pressed': value === tint,
+            onClick: () => setTint(value),
+        }, t(tintKey(value))))), h('div', { className: 'dbr-page-meta', role: 'status', 'aria-live': 'polite' }, fetching ? h('span', { className: 'dbr-updating' }, t('dashboard.updating')) : null, priceTime !== null ? h('span', null, t('dashboard.pricesAsOf', { time: priceTime })) : null)), state.status === 'loading'
             ? h('div', { className: 'dbr-page-grid' }, h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-skeleton' })))
             : state.status === 'error'
                 ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-page-err' }, h('div', { className: 'dbr-err' }, h('span', { className: 'dbr-code' }, state.error?.code ?? 'DEBRIEF_ERROR'), h('span', null, state.error?.message ?? '')), h('button', { type: 'button', className: 'dbr-more', onClick: () => setAttempt((previous) => previous + 1) }, t('page.retry'))))
@@ -1749,13 +1785,17 @@ function clientFactory(requireFn) {
                         k: t('page.kpiDayPnl'),
                         v: money(Number(kpis.dayPnl) * factor, activeCcy),
                         d: pct(kpis.dayPnlPct),
-                        cls: updown(kpis.dayPnlPct),
+                        cls: updown(kpis.dayPnl) || updown(kpis.dayPnlPct),
                     }), h(Stat, {
                         k: t('page.kpiTotalPnl'),
                         v: money(Number(kpis.totalPnl) * factor, activeCcy),
                         d: pct(kpis.totalPnlPct),
-                        cls: updown(kpis.totalPnlPct),
-                    }), h(Stat, { k: t('page.kpiAnnual'), v: pct(kpis.annualPct) })), h('div', { className: 'wide dbr-hint', style: { textAlign: 'right' } }, fx !== null && fxOk
+                        cls: updown(kpis.totalPnl) || updown(kpis.totalPnlPct),
+                    }), h(Stat, {
+                        k: t('page.kpiAnnual'),
+                        v: pct(kpis.annualPct),
+                        cls: updown(kpis.annualPct),
+                    })), h('div', { className: 'wide dbr-hint', style: { textAlign: 'right' } }, fx !== null && fxOk
                         ? t('page.fxRate', { rate: fmt(factor, 4), ccy: activeCcy, time: fxTime })
                         : t('page.fxMissing')), h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('dashboard.equity'), h('span', { className: 'dbr-hint', style: { margin: '0 0 0 auto' } }, t('page.refreshed', { time: new Date().toLocaleTimeString('zh-CN') }))), equity.length > 1
                         ? h(LazyChart, {
