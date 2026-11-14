@@ -415,6 +415,60 @@ def _migrate_v14_price_cache_fetched_at(conn: Connection) -> None:
         conn.execute(text("ALTER TABLE price_cache ADD COLUMN fetched_at DATETIME"))
 
 
+CATALOG_V15_TABLE_SQL = """
+CREATE TABLE instrument_catalog (
+    id INTEGER NOT NULL,
+    market VARCHAR(10) NOT NULL,
+    symbol VARCHAR(32) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    currency VARCHAR(10),
+    asset_class VARCHAR(20) NOT NULL,
+    pinyin_alias VARCHAR(300),
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uq_catalog_market_symbol_class UNIQUE (market, symbol, asset_class)
+)
+"""
+
+
+def _unique_index_columns(conn: Connection, table: str) -> list:
+    """(index name, column list) for every unique index on `table`."""
+    found = []
+    for row in conn.execute(text(f"PRAGMA index_list({table})")).fetchall():
+        if not row[2]:  # 0 = seq, 1 = name, 2 = unique flag
+            continue
+        columns = [info[2] for info in conn.execute(text(f"PRAGMA index_info({row[1]})")).fetchall()]
+        found.append((row[1], columns))
+    return found
+
+
+def _migrate_v15_catalog_asset_class(conn: Connection) -> None:
+    """instrument_catalog: unique (market, symbol) → (market, symbol, asset_class).
+
+    CN codespaces overlap — 000001 is 平安银行 (Shenzhen stock) and 华夏成长混合
+    (open-end fund) — so the two-column key silently dropped one of them on every
+    sync. SQLite cannot drop a constraint in place: rebuild and copy.
+    """
+    if "instrument_catalog" not in _table_names(conn):
+        return
+    legacy = any(columns == ["market", "symbol"] for _, columns in _unique_index_columns(conn, "instrument_catalog"))
+    if not legacy:
+        return
+    conn.execute(text("ALTER TABLE instrument_catalog RENAME TO instrument_catalog_legacy"))
+    conn.execute(text(CATALOG_V15_TABLE_SQL))
+    conn.execute(
+        text(
+            """
+            INSERT INTO instrument_catalog
+                (id, market, symbol, name, currency, asset_class, pinyin_alias, updated_at)
+            SELECT id, market, symbol, name, currency, asset_class, pinyin_alias, updated_at
+            FROM instrument_catalog_legacy
+            """
+        )
+    )
+    conn.execute(text("DROP TABLE instrument_catalog_legacy"))
+
+
 MIGRATIONS = [
     # Each entry: (version, sql_statement | callable)
     # Version 1: add name column to holdings (added 2026-07-18)
@@ -514,6 +568,7 @@ MIGRATIONS = [
     ("v12_debrief_analysis_reports", _migrate_v12_analysis_reports),
     ("v13_debrief_write_columns", _migrate_v13_write_columns),
     ("v14_price_cache_fetched_at", _migrate_v14_price_cache_fetched_at),
+    ("v15_catalog_asset_class", _migrate_v15_catalog_asset_class),
 ]
 
 

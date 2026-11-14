@@ -192,3 +192,48 @@ def test_retention_cleanup_batches_and_protects_running(tmp_path, monkeypatch):
         remaining = conn.execute(text("SELECT count(*) FROM job_runs")).scalar()
     assert remaining == 2  # running old row + recent row
     engine.dispose()
+
+
+def test_v15_catalog_key_includes_asset_class(tmp_path):
+    """000001 is both a Shenzhen stock and an open-end fund: keep both rows."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog-v14.db'}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE instrument_catalog (
+                    id INTEGER PRIMARY KEY,
+                    market VARCHAR(10) NOT NULL,
+                    symbol VARCHAR(32) NOT NULL,
+                    name VARCHAR(200) NOT NULL,
+                    currency VARCHAR(10),
+                    asset_class VARCHAR(20) NOT NULL,
+                    pinyin_alias VARCHAR(300),
+                    updated_at DATETIME NOT NULL,
+                    CONSTRAINT uq_catalog_market_symbol UNIQUE (market, symbol)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO instrument_catalog (market, symbol, name, asset_class, updated_at) "
+                "VALUES ('CN', '000001', '华夏成长混合', 'fund', '2026-11-14 00:00:00')"
+            )
+        )
+
+    migrate(engine)
+    migrate(engine)  # idempotent: a second run must not rebuild again
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO instrument_catalog (market, symbol, name, asset_class, updated_at) "
+                "VALUES ('CN', '000001', '平安银行', 'stock', '2026-11-14 00:00:00')"
+            )
+        )
+        rows = conn.execute(
+            text("SELECT asset_class, name FROM instrument_catalog WHERE symbol = '000001' ORDER BY id")
+        ).fetchall()
+    assert [tuple(row) for row in rows] == [("fund", "华夏成长混合"), ("stock", "平安银行")]
+    engine.dispose()

@@ -32,9 +32,6 @@ def db(tmp_path):
                     market="CN", symbol="600519", name="贵州茅台", currency="CNY", asset_class="stock"
                 ),
                 InstrumentCatalog(
-                    market="CN", symbol="510300", name="沪深300ETF", currency="CNY", asset_class="etf"
-                ),
-                InstrumentCatalog(
                     market="CN",
                     symbol="020357",
                     name="华夏半导体材料设备ETF联接C",
@@ -49,6 +46,29 @@ def db(tmp_path):
                     currency="CNY",
                     asset_class="fund",
                     pinyin_alias="HXKC50ETFLJC",
+                ),
+                # 000001 is genuinely two instruments; both must stay addressable.
+                InstrumentCatalog(
+                    market="CN", symbol="000001", name="平安银行", currency="CNY", asset_class="stock"
+                ),
+                InstrumentCatalog(
+                    market="CN", symbol="000001", name="华夏成长混合", currency="CNY", asset_class="fund"
+                ),
+                # 510300 appears in both the ETF list and the fund list; the fund
+                # source also uses the ETF's own name.
+                InstrumentCatalog(
+                    market="CN",
+                    symbol="510300",
+                    name="沪深300ETF华泰柏瑞",
+                    currency="CNY",
+                    asset_class="etf",
+                ),
+                InstrumentCatalog(
+                    market="CN",
+                    symbol="510300",
+                    name="沪深300ETF华泰柏瑞",
+                    currency="CNY",
+                    asset_class="fund",
                 ),
             ]
         )
@@ -215,3 +235,35 @@ def test_akshare_rows_strips_exchange_prefixes_and_skips_nan():
     )
     rows = _akshare_rows(lambda ak: frame, "CN", "CNY", "etf", 100, "代码", "名称", strip_prefix=True)
     assert [row["symbol"] for row in rows] == ["510300", "159998", "510500"]
+
+
+def test_ambiguous_code_is_listed_once_per_asset_class(db):
+    """000001 must come back as both 平安银行 and 华夏成长混合, addressable apart."""
+    with Session(db) as session:
+        items, _ = search(session, "CN", "000001")
+    by_symbol = {item["symbol"]: item for item in items}
+    assert by_symbol["stock:000001"]["name"] == "平安银行"
+    assert by_symbol["stock:000001"]["assetClass"] == "stock"
+    assert by_symbol["fund:000001"]["name"] == "华夏成长混合"
+    assert by_symbol["fund:000001"]["assetClass"] == "fund"
+
+
+def test_duplicate_listing_of_one_instrument_is_collapsed(db):
+    """510300 is in both the ETF and the fund list under the same name."""
+    with Session(db) as session:
+        items, _ = search(session, "CN", "510300")
+    assert len(items) == 1
+    assert items[0]["symbol"] == "510300"  # the class the code implies, so no prefix
+    assert items[0]["assetClass"] == "etf"
+
+
+def test_upsert_keeps_one_row_per_asset_class(db):
+    from debrief.catalog import _upsert_rows
+
+    base = {"market": "CN", "symbol": "000002", "name": "万  科Ａ", "currency": "CNY", "pinyin_alias": None}
+    with Session(db) as session:
+        _upsert_rows(session, [{**base, "asset_class": "stock"}])
+        _upsert_rows(session, [{**base, "asset_class": "fund", "name": "万科债券"}])
+        _upsert_rows(session, [{**base, "asset_class": "stock", "name": "万科A"}])
+        rows = session.query(InstrumentCatalog).filter_by(symbol="000002").all()
+    assert {(row.asset_class, row.name) for row in rows} == {("stock", "万科A"), ("fund", "万科债券")}

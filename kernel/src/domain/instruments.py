@@ -30,3 +30,32 @@ def resolve_cn_symbol(value: str) -> tuple[str, str]:
     if not code.isdigit() or len(code) != 6:
         raise ValueError("CN symbols must contain a six-digit code")
     return kind, code
+
+
+def qualify_cn_symbol(symbol: str, asset_class: str) -> str:
+    """Catalog symbol to hand back to the picker for one (code, class) pair.
+
+    A bare code is kept when `resolve_cn_symbol` already infers the same class
+    (`600519` → stock, `020357` → fund, `510300` → etf). Ambiguous codes get the
+    explicit `class:` prefix the resolver understands, so `000001` can be
+    offered twice — 平安银行 as `stock:000001`, 华夏成长混合 as `fund:000001` —
+    and the write path stores something that resolves back unambiguously.
+    """
+    code = (symbol or "").strip()
+    kind = (asset_class or "").strip().lower()
+    if not code or kind not in {"stock", "fund", "etf"}:
+        return code
+    try:
+        inferred, _ = resolve_cn_symbol(code)
+    except ValueError:
+        return f"{kind}:{code}"
+    return code if inferred == kind else f"{kind}:{code}"
+
+
+def inferred_cn_class(symbol: str) -> str | None:
+    """The class a bare CN code implies, or None when it is ambiguous."""
+    try:
+        kind, _ = resolve_cn_symbol(symbol)
+    except ValueError:
+        return None
+    return kind

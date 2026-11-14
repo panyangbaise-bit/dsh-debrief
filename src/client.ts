@@ -174,6 +174,10 @@ export const zh = {
   'edit.searchError': '搜索失败，请稍后重试',
   'edit.searchHint': '在结果中选择标的后填写表单',
   'edit.held': '已持有',
+  'asset.stock': '股票',
+  'asset.fund': '基金',
+  'asset.etf': 'ETF',
+  'asset.crypto': '加密',
   'edit.quantity': '数量',
   'edit.cost': '成本价',
   'edit.targetPrice': '关注价',
@@ -358,6 +362,10 @@ export const en: Record<keyof typeof zh, string> = {
   'edit.searchError': 'Search failed, try again later',
   'edit.searchHint': 'Pick an instrument from the results, then fill the form',
   'edit.held': 'Held',
+  'asset.stock': 'Stock',
+  'asset.fund': 'Fund',
+  'asset.etf': 'ETF',
+  'asset.crypto': 'Crypto',
   'edit.quantity': 'Quantity',
   'edit.cost': 'Cost',
   'edit.targetPrice': 'Target price',
@@ -2194,6 +2202,7 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
   }
 
   const MARKET_KEY = (market: string): string => `mkt.${market.toLowerCase()}`
+  const ASSET_KEY = (assetClass: string): string => `asset.${String(assetClass || 'stock').toLowerCase()}`
 
   function EditModal(props: { t: Translate; state: ModalState; onClose(): void; onSaved(): void }): unknown {
     const t = props.t
@@ -2483,7 +2492,9 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                               h(
                                 'div',
                                 {
-                                  key: String(item.symbol ?? ''),
+                                  // The same code can be listed once per asset class
+                                  // (000001 stock vs fund), so the symbol alone is not unique.
+                                  key: `${String(item.symbol ?? '')}|${String(item.assetClass ?? '')}|${String(item.name ?? '')}`,
                                   role: 'option',
                                   'aria-selected': selected?.symbol === item.symbol,
                                   className:
@@ -2495,6 +2506,7 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
                                 },
                                 h('span', { className: 'dbr-picker-code' }, String(item.symbol ?? '')),
                                 h('span', null, String(item.name ?? '')),
+                                h('span', { className: 'dbr-b' }, t(ASSET_KEY(String(item.assetClass ?? '')))),
                                 h('span', { className: 'dbr-b market' }, t(MARKET_KEY(String(item.market ?? market)))),
                                 item.held === true ? h('span', { className: 'dbr-b ok' }, t('edit.held')) : null,
                               ),

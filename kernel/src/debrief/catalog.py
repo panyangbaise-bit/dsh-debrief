@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from db.models import Holding, InstrumentCatalog
 from debrief.context import market_to_output
+from domain.instruments import inferred_cn_class, qualify_cn_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +145,25 @@ def coingecko_search(query: str, limit: int = 10) -> list[dict]:
     return items
 
 
+def _class_tiebreak(row: InstrumentCatalog) -> int:
+    """Prefer the asset class a bare CN code actually implies (510300 is an ETF
+    even though the fund list also carries it)."""
+    if row.market != "CN":
+        return 0
+    return 0 if inferred_cn_class(row.symbol) == row.asset_class else 1
+
+
+def _dedupe_same_instrument(rows: list) -> list:
+    """Drop the same instrument seen from two sources (ETF list + fund list)."""
+    kept: dict = {}
+    for row in rows:
+        key = (row.market, row.symbol, row.name)
+        current = kept.get(key)
+        if current is None or _class_tiebreak(row) < _class_tiebreak(current):
+            kept[key] = row
+    return list(kept.values())
+
+
 def _like_pattern(value: str) -> str:
     """Lower-cased substring LIKE pattern with metacharacters escaped."""
     escaped = (
@@ -190,23 +210,22 @@ def search(
     ).all()
     ranked = sorted(
         ((_rank(query, r), r) for r in rows if _rank(query, r)[0] < 9),
-        key=lambda pair: pair[0],
+        key=lambda pair: (pair[0], _class_tiebreak(pair[1])),
     )
-    matched = [row for _, row in ranked]
+    matched = _dedupe_same_instrument([row for _, row in ranked])
     # An exact symbol hit is authoritative (a fund code must never wait on the
     # live suggest round-trip, which is throttled and costs ~1.5 s).
     exact_symbol_hit = bool(ranked) and ranked[0][0][0] == 0
     items = []
-    seen = set()
+    # One (market, symbol) may legitimately map to several asset classes; only
+    # the live-suggest extras are deduped against it by bare code.
+    seen = {(row.market, row.symbol) for row in matched}
     for row in matched:
-        key = (row.market, row.symbol)
-        if key in seen:
-            continue
-        seen.add(key)
+        symbol = qualify_cn_symbol(row.symbol, row.asset_class) if row.market == "CN" else row.symbol
         items.append(
             {
                 "market": market_to_output(row.market),
-                "symbol": row.symbol,
+                "symbol": symbol,
                 "name": row.name,
                 "currency": row.currency,
                 "assetClass": row.asset_class,
@@ -235,7 +254,9 @@ def search(
         logger.warning("instrument suggest fallback failed: %s", exc)
         extras = []
     for extra in extras:
-        if (extra["market"], extra["symbol"]) not in seen:
+        key = (extra["market"], extra["symbol"])
+        if key not in seen:
+            seen.add(key)
             items.append(extra)
         if len(items) >= limit:
             break
@@ -279,10 +300,9 @@ def _upsert_rows(session: Session, rows: list[dict]) -> int:
             """
             INSERT INTO instrument_catalog (market, symbol, name, currency, asset_class, pinyin_alias, updated_at)
             VALUES (:market, :symbol, :name, :currency, :asset_class, :pinyin_alias, :updated_at)
-            ON CONFLICT(market, symbol) DO UPDATE SET
+            ON CONFLICT(market, symbol, asset_class) DO UPDATE SET
                 name = excluded.name,
                 currency = excluded.currency,
-                asset_class = excluded.asset_class,
                 pinyin_alias = excluded.pinyin_alias,
                 updated_at = excluded.updated_at
             """

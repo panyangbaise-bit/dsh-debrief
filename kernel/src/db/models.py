@@ -356,7 +356,11 @@ class InstrumentCatalog(Base):
     """Local instrument directory synced daily (akshare lists + CoinGecko)."""
 
     __tablename__ = "instrument_catalog"
-    __table_args__ = (UniqueConstraint("market", "symbol", name="uq_catalog_market_symbol"),)
+    # asset_class is part of the key: 000001 is both 平安银行 (stock) and
+    # 华夏成长混合 (open-end fund), and both must stay addressable.
+    __table_args__ = (
+        UniqueConstraint("market", "symbol", "asset_class", name="uq_catalog_market_symbol_class"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     market: Mapped[str] = mapped_column(String(10), nullable=False)
