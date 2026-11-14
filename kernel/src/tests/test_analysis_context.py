@@ -195,3 +195,13 @@ def test_report_list_window(seeded_db, run_cli):
     assert code == 0
     assert [item["market"] for item in payload["data"]["items"]] == ["CN"]
     assert payload["data"]["count"] == 1
+
+
+def test_date_arg_interprets_naive_as_app_timezone():
+    """Naive --since/--until are read as Beijing time, normalised to naive UTC."""
+    from debrief.cli import _date_arg
+
+    aware = _date_arg("2026-11-14T00:00:00+08:00")
+    naive = _date_arg("2026-11-14T00:00:00")
+    assert naive == aware  # both are 2026-11-13 16:00 UTC (Asia/Shanghai default)
+    assert naive.hour == 16

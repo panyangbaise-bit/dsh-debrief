@@ -43,11 +43,19 @@ def _int_arg(value: Optional[str], default: int, minimum: int = 0) -> int:
 
 
 def _date_arg(value: Optional[str]):
-    """Parse an ISO-8601 date/datetime (naive UTC) for --since / --until."""
+    """Parse an ISO-8601 date/datetime for --since / --until.
+
+    A naive value is interpreted in the kernel's APP_TIMEZONE (Asia/Shanghai),
+    matching how users phrase windows; the result is naive UTC to line up with
+    the DB, which stores UTC as naive datetimes.
+    """
     if value is None:
         return None
     from datetime import datetime as _dt
     from datetime import timezone as _tz
+    from zoneinfo import ZoneInfo
+
+    from config import config as _config
 
     text = value.strip()
     if not text:
@@ -56,8 +64,9 @@ def _date_arg(value: Optional[str]):
         parsed = _dt.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         raise UsageError(f"--since/--until expects ISO-8601, got '{value}'") from None
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(_tz.utc).replace(tzinfo=None)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo(_config.APP_TIMEZONE))
+    parsed = parsed.astimezone(_tz.utc).replace(tzinfo=None)
     return parsed
 
 
