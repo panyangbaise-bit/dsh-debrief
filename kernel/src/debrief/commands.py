@@ -1242,33 +1242,51 @@ def cmd_holdings_add(session: Session, payload: dict) -> dict:
         )
         .first()
     )
+    # A fully closed position (shares 0) is not a duplicate: adding it again is
+    # a re-buy, so the same record is re-opened instead of returning a conflict.
+    reopen = False
     if existing is not None:
-        raise KernelError(
-            "DEBRIEF_CONFLICT",
-            f"holding {market_to_output(market_db)}:{symbol} already exists (id {existing.id})",
-        )
+        closed = existing.status == "closed" or float(existing.shares or 0) <= 0
+        if not closed:
+            raise KernelError(
+                "DEBRIEF_CONFLICT",
+                f"holding {market_to_output(market_db)}:{symbol} already exists (id {existing.id})",
+            )
+        reopen = True
 
     catalog_hit = catalog.lookup_exact(session, market_to_output(market_db), symbol)
     resolved_name = (name or "").strip() or None
     if resolved_name is None and catalog_hit:
         resolved_name = catalog_hit["name"]
+    if resolved_name is None and reopen:
+        resolved_name = (existing.name or "").strip() or None
     if not resolved_name:
         raise KernelError(
             "DEBRIEF_VALIDATION",
             "name is required when the symbol is not in the instrument catalog",
         )
 
-    holding = Holding(
-        ticker=symbol,
-        name=resolved_name,
-        market=market_db,
-        shares=quantity,
-        cost_basis=cost,
-        position_type="core",
-        status="open",
-    )
-    session.add(holding)
-    session.flush()
+    if reopen:
+        holding = existing
+        holding.shares = quantity
+        holding.cost_basis = cost
+        holding.name = resolved_name
+        holding.updated_at = _now()
+        if quantity > 0:
+            holding.status = "open"
+        session.flush()
+    else:
+        holding = Holding(
+            ticker=symbol,
+            name=resolved_name,
+            market=market_db,
+            shares=quantity,
+            cost_basis=cost,
+            position_type="core",
+            status="open",
+        )
+        session.add(holding)
+        session.flush()
     if quantity > 0:
         session.add(
             Transaction(
@@ -1276,8 +1294,8 @@ def cmd_holdings_add(session: Session, payload: dict) -> dict:
                 action="buy",
                 shares=quantity,
                 price=cost if cost > 0 else 0.0,
-                notes="opening",
-                date=holding.created_at or _now(),
+                notes="reopen" if reopen else "opening",
+                date=_now(),
             )
         )
     audit_payload = dict(payload)
@@ -1288,7 +1306,7 @@ def cmd_holdings_add(session: Session, payload: dict) -> dict:
         "holding.add",
         target_type="holding",
         target_id=str(holding.id),
-        notes=f"add {market_to_output(market_db)}:{symbol}",
+        notes=f"{'reopen' if reopen else 'add'} {market_to_output(market_db)}:{symbol}",
         payload=audit_payload,
     )
     return {

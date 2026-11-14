@@ -96,6 +96,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - 四个盘后 prompt 增加「先陈述数据边界」硬约束（报价时点/交易时段、记忆是否
   命中、新闻是否跨市场；持平快照不得当作当日涨跌）。
 
+- **已平仓标的重买报 DEBRIEF_CONFLICT** — 添加持仓时，若该 (market, symbol)
+  已有一条 `shares=0 / status=closed` 的历史记录，`holdings add` 只会看到
+  「记录已存在」并拒绝。现在这种记录按「重买」处理：复用原记录、置为 open、
+  写入新的买入流水（notes=`reopen`），审计记为 `holding.add / reopen …`；
+  真正还有持仓的重复添加仍然返回冲突。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

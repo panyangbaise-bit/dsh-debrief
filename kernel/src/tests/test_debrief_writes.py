@@ -101,6 +101,35 @@ def test_holdings_add_conflict(db):
     assert excinfo.value.code == "DEBRIEF_CONFLICT"
 
 
+def test_holdings_add_reopens_a_closed_position(db):
+    """Fully closed (shares 0) is not a duplicate: re-adding it is a re-buy."""
+    seed_catalog(db)
+    with Session(db) as session:
+        from debrief import commands
+
+        first = commands.cmd_holdings_add(
+            session, {"market": "cn", "symbol": "600519", "quantity": 100, "cost": 1450}
+        )
+        holding = session.get(Holding, first["id"])
+        holding.shares = 0.0
+        holding.status = "closed"
+        session.commit()
+
+        again = commands.cmd_holdings_add(
+            session, {"market": "CN", "symbol": "600519", "quantity": 387.93, "cost": 2.5778}
+        )
+    assert again["id"] == first["id"]  # same record, not a new row
+    with Session(db) as session:
+        holding = session.get(Holding, first["id"])
+        assert holding.status == "open"
+        assert holding.shares == pytest.approx(387.93)
+        assert holding.cost_basis == pytest.approx(2.5778)
+        assert len(holding.transactions) == 2
+        assert session.scalars(select(Holding)).all() == [holding]
+    notes = [row.notes for row in audit_rows(db, "holding.add")]
+    assert notes[-1].startswith("reopen ")
+
+
 def test_holdings_add_requires_name_without_catalog(db):
     with Session(db) as session:
         from debrief import commands
