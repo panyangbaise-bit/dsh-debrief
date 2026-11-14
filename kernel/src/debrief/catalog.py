@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import requests
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from db.models import Holding, InstrumentCatalog
@@ -144,6 +144,14 @@ def coingecko_search(query: str, limit: int = 10) -> list[dict]:
     return items
 
 
+def _like_pattern(value: str) -> str:
+    """Lower-cased substring LIKE pattern with metacharacters escaped."""
+    escaped = (
+        (value or "").lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
 def _rank(query: str, row: InstrumentCatalog) -> tuple[int, str]:
     q = query.lower()
     symbol = (row.symbol or "").lower()
@@ -166,12 +174,28 @@ def search(
     session: Session, market_db: str, query: str, limit: int = 20
 ) -> tuple[list[dict], str]:
     """Ranked catalog search with live suggest fallback; never fails hard."""
+    # SQL prefilter keeps the per-keystroke cost flat now that the CN catalog
+    # holds ~28k open-end funds on top of stocks/ETFs; ranking stays in Python
+    # so the exact > prefix > name > substring ordering is unchanged.
+    pattern = _like_pattern(query)
     rows = session.scalars(
-        select(InstrumentCatalog).where(InstrumentCatalog.market == market_db)
+        select(InstrumentCatalog).where(
+            InstrumentCatalog.market == market_db,
+            or_(
+                func.lower(InstrumentCatalog.symbol).like(pattern, escape="\\"),
+                func.lower(InstrumentCatalog.name).like(pattern, escape="\\"),
+                func.lower(func.coalesce(InstrumentCatalog.pinyin_alias, "")).like(pattern, escape="\\"),
+            ),
+        )
     ).all()
-    matched = sorted(
-        (r for r in rows if _rank(query, r)[0] < 9), key=lambda r: _rank(query, r)
+    ranked = sorted(
+        ((_rank(query, r), r) for r in rows if _rank(query, r)[0] < 9),
+        key=lambda pair: pair[0],
     )
+    matched = [row for _, row in ranked]
+    # An exact symbol hit is authoritative (a fund code must never wait on the
+    # live suggest round-trip, which is throttled and costs ~1.5 s).
+    exact_symbol_hit = bool(ranked) and ranked[0][0][0] == 0
     items = []
     seen = set()
     for row in matched:
@@ -202,7 +226,11 @@ def search(
         if market_db == "CRYPTO":
             extras = coingecko_search(query, limit) if not items else []
         else:
-            extras = eastmoney_suggest(query, market_db, limit=10) if len(items) < 5 else []
+            extras = (
+                eastmoney_suggest(query, market_db, limit=10)
+                if len(items) < 5 and not exact_symbol_hit
+                else []
+            )
     except Exception as exc:  # defensive: unforeseen upstream errors must not surface
         logger.warning("instrument suggest fallback failed: %s", exc)
         extras = []
@@ -316,6 +344,11 @@ def _akshare_rows(loader, market: str, currency: str, kind: str, limit: int):
         name = str(values.get("名称") or values.get("name") or values.get("基金简称") or "").strip()
         if not code or not name:
             continue
+        alias = ""
+        for key in ("拼音缩写", "拼音简称", "拼音"):
+            if values.get(key):
+                alias = str(values[key]).strip()[:60]
+                break
         rows.append(
             {
                 "market": market,
@@ -323,10 +356,16 @@ def _akshare_rows(loader, market: str, currency: str, kind: str, limit: int):
                 "name": name[:200],
                 "currency": currency,
                 "asset_class": kind,
-                "pinyin_alias": None,
+                "pinyin_alias": alias or None,
             }
         )
     return rows
+
+
+# Open-end funds (场外基金) are ~28k codes today and akshare returns them
+# sorted by code, so any cap below that silently hides every 01xxxx/02xxxx
+# fund — including most ETF feeder funds launched after 2024.
+FUND_SYNC_LIMIT = 40000
 
 
 def sync_stock_catalog(session: Session) -> dict:
@@ -335,7 +374,7 @@ def sync_stock_catalog(session: Session) -> dict:
     sources = (
         ("cn_stock", lambda: _akshare_rows(lambda ak: ak.stock_info_a_code_name(), "CN", "CNY", "stock", 6000)),
         ("cn_etf", lambda: _akshare_rows(lambda ak: ak.fund_etf_spot_em(), "CN", "CNY", "etf", 1500)),
-        ("cn_fund", lambda: _akshare_rows(lambda ak: ak.fund_name_em(), "CN", "CNY", "fund", 6000)),
+        ("cn_fund", lambda: _akshare_rows(lambda ak: ak.fund_name_em(), "CN", "CNY", "fund", FUND_SYNC_LIMIT)),
         ("hk_stock", lambda: _akshare_rows(lambda ak: ak.stock_hk_spot_em(), "HK", "HKD", "stock", 4000)),
         ("us_stock", lambda: _akshare_rows(lambda ak: ak.stock_us_spot_em(), "US", "USD", "stock", 8000)),
     )

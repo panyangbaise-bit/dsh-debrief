@@ -23,6 +23,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recompiles pandas/akshare on every call. Bootstrap installs with
   `uv pip install --compile` and runs `compileall` over the venv afterwards.
 
+### Fixed
+
+- **场外基金搜不到** — the CN open-end fund catalog was capped at 6 000 codes,
+  but akshare returns ≈28 000 sorted by code, so every `01xxxx`/`02xxxx` fund
+  (including 华夏半导体材料设备ETF联接C `020357` and 华夏科创50ETF联接C
+  `011613`) fell outside the cap and never reached the picker. The cap is now
+  40 000 and the sync also stores `拼音缩写`, so `hxbd` finds 华夏半导体….
+  Quotes were never the problem: the CN adapter already fetched OTC-fund NAV.
+- **Symbol lookups no longer wait on the live suggest** — an exact code match
+  (e.g. `020357`) answers from the local catalog in ~30 ms instead of a
+  ~1.5 s eastmoney round-trip; the live fallback still covers names and
+  instruments the catalog does not know.
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three
@@ -43,6 +56,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Catalog search prefilters in SQL before ranking, so a 28 k-row CN catalog
+  still answers in ~20–35 ms per keystroke.
 - Dashboard reads default to `--no-refresh`; quote freshness is owned by the
   background refresh (or the scheduled worker). `dashboardRefresh: inline`
   restores the pre-0.3 blocking behaviour.
