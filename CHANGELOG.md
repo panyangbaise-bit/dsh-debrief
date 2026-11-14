@@ -58,11 +58,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   保留代码本身蕴含的类别，避免选择器出现两个一模一样的条目；选择器新增
   股票/基金/ETF 类别徽标。
 
+- **港股/美股目录补上官方备用源** — 两者此前只有东方财富 push2 一个来源，
+  限流时目录为空、搜索回退到 1–2 s 的实时 suggest。现在：
+  美股备用 **Nasdaq Trader SymDir**（`nasdaqlisted.txt` + `otherlisted.txt`，
+  13 248 条，含 5 787 只 ETF，类别股代码统一成 `BRK-A` 形式），
+  港股备用 **HKEX List of Securities**（3 279 条，含 453 只 ETF；文件里
+  权证/牛熊证/债券占绝大多数，按 Category 过滤，代码补零到 5 位）。
+  四个市场目录现在都有本地覆盖：US 13 248 / HK 3 279 / CN 34 852 / CC 1 688，
+  搜索 4–29 ms。
+
 ### Known limitations
 
 
-- 港股/美股目录仍依赖东方财富单一来源（push2 限流时为空），搜索回退到
-  1–2 s 的实时 suggest。
+
+- 美股备用源不含 OTC/粉单市场（Nasdaq Trader 只覆盖 NASDAQ/NYSE/AMEX/Arca）；
+  `SPCX` 这类粉单标的需要靠实时 suggest 才能搜到。
 
 ### Performance
 

@@ -267,3 +267,76 @@ def test_upsert_keeps_one_row_per_asset_class(db):
         _upsert_rows(session, [{**base, "asset_class": "stock", "name": "万科A"}])
         rows = session.query(InstrumentCatalog).filter_by(symbol="000002").all()
     assert {(row.asset_class, row.name) for row in rows} == {("stock", "万科A"), ("fund", "万科债券")}
+
+
+def test_nasdaq_trader_directory_is_parsed():
+    from debrief.catalog import _parse_nasdaq_trader
+
+    text = (
+        "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares\n"
+        "AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N\n"
+        "SPY|SPDR S&P 500 ETF Trust|P|N|N|100|Y|N\n"
+        "ZZZZ|Test Issue Corp|Q|Y|N|100|N|N\n"
+        "BRK.A|Berkshire Hathaway Inc. Class A|Q|N|N|1|N|N\n"
+        "File Creation Time: 1114202618:01|" + "|" * 7 + "\n"
+    )
+    rows = _parse_nasdaq_trader(text, 100)
+    assert [row["symbol"] for row in rows] == ["AAPL", "SPY", "BRK-A"]
+    assert rows[1]["asset_class"] == "etf"
+    assert rows[0]["market"] == "US" and rows[0]["currency"] == "USD"
+
+
+def test_hkex_securities_sheet_is_parsed():
+    pandas = pytest.importorskip("pandas")
+    from debrief.catalog import _parse_hkex_frame
+
+    frame = pandas.DataFrame(
+        [
+            {"Stock Code": 1, "Name of Securities": "CKH HOLDINGS", "Category": "Equity",
+             "Sub-Category": "Equity Securities (Main Board)"},
+            {"Stock Code": 700, "Name of Securities": "TENCENT", "Category": "Equity",
+             "Sub-Category": "Equity Securities (Main Board)"},
+            {"Stock Code": 2800, "Name of Securities": "TRACKER FUND", "Category": "Exchange Traded Products",
+             "Sub-Category": "Exchange Traded Funds"},
+            {"Stock Code": 12345, "Name of Securities": "SOME WARRANT", "Category": "Derivative Warrants",
+             "Sub-Category": "Warrants"},
+        ]
+    )
+    rows = _parse_hkex_frame(frame, 100)
+    assert [(row["symbol"], row["asset_class"]) for row in rows] == [
+        ("00001", "stock"),
+        ("00700", "stock"),
+        ("02800", "etf"),
+    ]
+    assert rows[0]["currency"] == "HKD"
+
+
+def test_us_and_hk_fall_back_to_public_directories(monkeypatch):
+    import debrief.catalog as catalog
+
+    class FakeResponse:
+        def __init__(self, text="", content=b""):
+            self.text = text
+            self.content = content
+
+        def raise_for_status(self):
+            return None
+
+    nasdaq = "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares\nNVDA|NVIDIA Corporation|Q|N|N|100|N|N\n"
+    other = "ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol\nIBM|International Business Machines|N|IBM|N|100|N|IBM\n"
+
+    def fake_rows(*args, **kwargs):
+        raise RuntimeError("eastmoney throttled")
+
+    def fake_get(url, timeout=None):
+        if url == catalog.NASDAQ_LISTED_URL:
+            return FakeResponse(text=nasdaq)
+        if url == catalog.OTHER_LISTED_URL:
+            return FakeResponse(text=other)
+        raise AssertionError(url)
+
+    monkeypatch.setattr(catalog, "_akshare_rows", fake_rows)
+    monkeypatch.setattr(catalog.requests, "get", fake_get)
+    rows = catalog._us_stock_rows(100)
+    assert [row["symbol"] for row in rows] == ["NVDA", "IBM"]
+    assert {row["market"] for row in rows} == {"US"}

@@ -24,6 +24,12 @@ from domain.instruments import inferred_cn_class, qualify_cn_symbol
 logger = logging.getLogger(__name__)
 
 EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+# Official, unthrottled symbol directories used when eastmoney push2 refuses us.
+NASDAQ_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+OTHER_LISTED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
+HKEX_SECURITIES_URL = (
+    "https://www.hkex.com.hk/eng/services/trading/securities/securitieslists/ListOfSecurities.xlsx"
+)
 EASTMONEY_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8"  # public web-search token
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 HTTP_TIMEOUT = 5
@@ -405,6 +411,136 @@ def _akshare_rows(
     return rows
 
 
+def _parse_nasdaq_trader(text: str, limit: int) -> list[dict]:
+    """Parse one Nasdaq Trader symbol-directory file into catalog rows.
+
+    Pipe-delimited, one header line, one "File Creation Time: ..." trailer.
+    Class shares use dots upstream ("BRK.A") but quote providers expect the
+    dash form, so the symbol is normalized on the way in.
+    """
+    lines = [line for line in (text or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return []
+    header = lines[0].split("|")
+    try:
+        symbol_col = header.index("Symbol") if "Symbol" in header else header.index("ACT Symbol")
+        name_col = header.index("Security Name")
+        test_col = header.index("Test Issue")
+    except ValueError:
+        return []
+    etf_col = header.index("ETF") if "ETF" in header else -1
+    rows = []
+    for line in lines[1:]:
+        parts = line.split("|")
+        if len(parts) != len(header):  # skips the File Creation Time trailer
+            continue
+        if parts[test_col].strip().upper() == "Y":
+            continue
+        symbol = parts[symbol_col].strip().upper().replace(".", "-")
+        name = parts[name_col].strip()
+        if not symbol or not name:
+            continue
+        rows.append(
+            {
+                "market": "US",
+                "symbol": symbol,
+                "name": name[:200],
+                "currency": "USD",
+                "asset_class": "etf" if etf_col >= 0 and parts[etf_col].strip().upper() == "Y" else "stock",
+                "pinyin_alias": None,
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _parse_hkex_frame(frame, limit: int) -> list[dict]:
+    """Catalog rows from the HKEX "List of Securities" sheet.
+
+    Only Category == Equity is kept (the file also carries warrants, debt and
+    trading-only lines); ETFs are Equity rows whose sub-category says so.
+    """
+    if frame is None or getattr(frame, "empty", True):
+        return []
+    # Warrants / CBBCs / debt dominate the file and are not investable here.
+    wanted = {"Equity", "Exchange Traded Products", "Real Estate Investment Trusts"}
+    rows = []
+    for _, rec in frame.iterrows():
+        values = rec.to_dict()
+        category = str(values.get("Category") or "").strip()
+        if category not in wanted:
+            continue
+        raw_code = values.get("Stock Code")
+        try:  # the sheet stores codes as numbers, so 00001 arrives as 1
+            code = f"{int(raw_code):05d}"
+        except (TypeError, ValueError):
+            code = str(raw_code or "").strip()
+        name = str(values.get("Name of Securities") or "").strip()
+        if not code.isdigit() or len(code) != 5 or not name or name.lower() == "nan":
+            continue
+        sub = str(values.get("Sub-Category") or "")
+        is_etf = category == "Exchange Traded Products" or "Exchange Traded" in sub
+        rows.append(
+            {
+                "market": "HK",
+                "symbol": code,
+                "name": name[:200],
+                "currency": "HKD",
+                "asset_class": "etf" if is_etf else "stock",
+                "pinyin_alias": None,
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _us_stock_rows(limit: int) -> list[dict]:
+    """US list: eastmoney push2, then the Nasdaq Trader symbol directories."""
+    try:
+        rows = _akshare_rows(lambda ak: ak.stock_us_spot_em(), "US", "USD", "stock", limit)
+        if rows:
+            return rows
+        logger.warning("catalog: eastmoney US list returned no rows; using Nasdaq Trader")
+    except Exception as exc:
+        logger.warning("catalog: eastmoney US list failed (%s); using Nasdaq Trader", exc)
+    rows: list[dict] = []
+    for url in (NASDAQ_LISTED_URL, OTHER_LISTED_URL):
+        try:
+            response = requests.get(url, timeout=HTTP_TIMEOUT)
+            response.raise_for_status()
+            rows.extend(_parse_nasdaq_trader(response.text, limit - len(rows)))
+        except Exception as exc:
+            logger.warning("catalog: Nasdaq Trader file failed (%s): %s", url, exc)
+        if len(rows) >= limit:
+            break
+    return rows[:limit]
+
+
+def _hk_stock_rows(limit: int) -> list[dict]:
+    """HK list: eastmoney push2, then the HKEX published securities list."""
+    try:
+        rows = _akshare_rows(lambda ak: ak.stock_hk_spot_em(), "HK", "HKD", "stock", limit)
+        if rows:
+            return rows
+        logger.warning("catalog: eastmoney HK list returned no rows; using HKEX")
+    except Exception as exc:
+        logger.warning("catalog: eastmoney HK list failed (%s); using HKEX", exc)
+    try:
+        import io
+
+        import pandas as pd
+
+        response = requests.get(HKEX_SECURITIES_URL, timeout=30)
+        response.raise_for_status()
+        frame = pd.read_excel(io.BytesIO(response.content), sheet_name=0, header=2, dtype=str)
+    except Exception as exc:
+        logger.warning("catalog: HKEX securities list failed: %s", exc)
+        return []
+    return _parse_hkex_frame(frame, limit)
+
+
 def _cn_stock_rows(limit: int) -> list[dict]:
     """A-share list: eastmoney, then the exchange-published lists.
 
@@ -471,8 +607,8 @@ def sync_stock_catalog(session: Session) -> dict:
         ("cn_stock", lambda: _cn_stock_rows(6000)),
         ("cn_etf", lambda: _cn_etf_rows(2000)),
         ("cn_fund", lambda: _akshare_rows(lambda ak: ak.fund_name_em(), "CN", "CNY", "fund", FUND_SYNC_LIMIT)),
-        ("hk_stock", lambda: _akshare_rows(lambda ak: ak.stock_hk_spot_em(), "HK", "HKD", "stock", 4000)),
-        ("us_stock", lambda: _akshare_rows(lambda ak: ak.stock_us_spot_em(), "US", "USD", "stock", 8000)),
+        ("hk_stock", lambda: _hk_stock_rows(4000)),
+        ("us_stock", lambda: _us_stock_rows(20000)),
     )
     for name, loader in sources:
         try:
