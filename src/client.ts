@@ -2657,6 +2657,9 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
     const showToast = (tone: 'ok' | 'error', text: string): void => setToast({ id: Date.now(), tone, text })
     const onSaved = (): void => {
       showToast('ok', t('edit.savedToast'))
+      // A write must invalidate the payload cache, otherwise the per-range
+      // cache hit would keep rendering the pre-write numbers.
+      rangeCache.clear()
       setAttempt((previous) => previous + 1)
     }
 

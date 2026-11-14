@@ -1626,6 +1626,9 @@ function clientFactory(requireFn) {
         const showToast = (tone, text) => setToast({ id: Date.now(), tone, text });
         const onSaved = () => {
             showToast('ok', t('edit.savedToast'));
+            // A write must invalidate the payload cache, otherwise the per-range
+            // cache hit would keep rendering the pre-write numbers.
+            rangeCache.clear();
             setAttempt((previous) => previous + 1);
         };
         React.useEffect(() => {
