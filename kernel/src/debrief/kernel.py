@@ -155,7 +155,11 @@ def build_holdings_payload(
             "positions": [],
             **refresh_meta,
         }
-    markets = {h.market for h in holdings}
+    # Every market in the ledger needs a rate, not just the open ones: the
+    # realised P&L of a fully sold HK/crypto position is part of the total, and
+    # calculate_portfolio_totals bails out (→ total 0) if any is missing.
+    all_holdings = session.query(Holding).filter(Holding.status != "archived").all()
+    markets = {h.market for h in holdings} | {h.market for h in all_holdings}
     rates = cny_rates(list(markets), cross_rates=cross_rates)
 
     positions, native_values, day_pnl = [], [], 0.0
@@ -195,7 +199,6 @@ def build_holdings_payload(
     for holding in holdings:
         last, _ = _two_closes(session, holding.ticker, holding.market.upper())
         prices[(holding.market, holding.ticker)] = last
-    all_holdings = session.query(Holding).filter(Holding.status != "archived").all()
     totals = calculate_portfolio_totals(
         all_holdings,
         prices,

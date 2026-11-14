@@ -154,3 +154,29 @@ def test_backfill_opening_buy_skips_holdings_that_already_traded():
         by_holding.setdefault(holding_id, []).append((action, notes))
     assert by_holding[empty_id] == [("buy", "opening")]
     assert by_holding[traded_id] == [("sell", None)]
+
+
+def test_closed_position_in_another_market_keeps_total_return(tmp_path, monkeypatch):
+    """A closed HK position must not blank the total return via a missing rate."""
+    monkeypatch.setenv("DEBRIEF_FX_USD", "7.2")
+    monkeypatch.setenv("DEBRIEF_FX_HKD", "0.92")
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+
+    from db.repository import apply_trade, create_holding, upsert_price
+    from debrief.context import open_engine
+    from debrief.kernel import build_holdings_payload
+
+    engine = open_engine(tmp_path / "totals.db")
+    with Session(engine) as session:
+        create_holding(session, "AAPL", "US", shares=10, cost_basis=100.0, name="苹果")
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        upsert_price(session, "AAPL", "US", today, close=110.0, source="seed")
+        hk = create_holding(session, "00700", "HK", shares=10, cost_basis=300.0, name="腾讯")
+        apply_trade(session, hk.id, "sell", 10, 350.0)
+        session.commit()
+        payload = build_holdings_payload(session, refresh=False)
+    engine.dispose()
+
+    # 10 * (110 - 100) * 7.2 unrealized + 10 * (350 - 300) * 0.92 realized.
+    assert payload["totalPnl"] == pytest.approx(720 + 460)
+    assert payload["totalPnlPct"] != 0

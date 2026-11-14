@@ -110,6 +110,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   图表末端标签，统一按涨跌染色；颜色按数额符号判定（为零才退回百分比），
   页面级 CSS 变量 `--dbr-up/--dbr-down` 由配色开关整体切换。
 
+### Fixed
+
+- **总收益恒为 ¥0** — `build_holdings_payload` 只给「当前持仓的市场」取汇率，
+  而 `calculate_portfolio_totals` 会把已平仓的历史持仓（本例的港股/加密）也算
+  进去；只要有一个已平仓市场缺汇率，整个函数就返回 `None`，页面于是显示
+  「总收益 ¥0 0.00%」。现在汇率覆盖账本里所有市场（含已平仓），实测
+  总收益 -4,373.73 / -3.09%（原为 0）。
+- **涨跌色不生效** — `.dbr-v`、`.dbr-table td` 等规则以更高优先级覆盖了
+  `.dbr-up/.dbr-down`，页面内所有涨跌数字实际无颜色。改为 `.dbr-page .dbr-up`
+  级别的选择器，KPI 数值、持仓盈亏%、自选涨跌%、距离%、图表末端标签统一着色。
+- **币种与配色收进下拉** — 头部不再平铺两组 chip，改为一个「CNY · 红涨绿跌」
+  下拉菜单（币种 + 涨跌配色两段），支持点击外部/Esc 关闭，选择仍持久化。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

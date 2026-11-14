@@ -122,6 +122,7 @@ const zh = {
     'page.refreshed': '更新于 {time}',
     'page.currency': '显示币种',
     'page.tint': '涨跌配色',
+    'page.displayOptions': '显示设置',
     'tint.greenUp': '绿涨红跌',
     'tint.redUp': '红涨绿跌',
     'page.fxRate': '1 CNY ≈ {rate} {ccy} · 汇率更新 {time}',
@@ -308,6 +309,7 @@ const en = {
     'page.refreshed': 'Updated {time}',
     'page.currency': 'Display currency',
     'page.tint': 'Gain/loss colours',
+    'page.displayOptions': 'Display options',
     'tint.greenUp': 'Green up',
     'tint.redUp': 'Red up',
     'page.fxRate': '1 CNY ≈ {rate} {ccy} · FX updated {time}',
@@ -786,6 +788,15 @@ function clientFactory(requireFn) {
 .dbr-switch input:checked + .dbr-switch-track::after{transform:translateX(14px);background:var(--dsw-alias-bg-layer-1)}
 .dbr-row-actions{display:flex;gap:4px;justify-content:flex-end}
 @media (max-width:768px){.dbr-page-grid{grid-template-columns:1fr}.dbr-page{padding:12px}}
+.dbr-page .dbr-up,.dbr-card .dbr-up{color:var(--dbr-up)}
+.dbr-page .dbr-down,.dbr-card .dbr-down{color:var(--dbr-down)}
+.dbr-menu-wrap{position:relative;display:inline-flex}
+.dbr-menu-btn{display:inline-flex;align-items:center;gap:6px}
+.dbr-menu-shade{position:fixed;inset:0;z-index:30}
+.dbr-menu{position:absolute;top:calc(100% + 6px);right:0;z-index:31;min-width:196px;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius-sm);box-shadow:var(--dsw-elevation-prominent,0 8px 24px rgba(0,0,0,.24));padding:8px}
+.dbr-menu-sec{font-size:10.5px;color:var(--dsw-alias-label-secondary);margin:2px 2px 6px}
+.dbr-menu-sec:not(:first-child){margin-top:10px}
+.dbr-menu-row{display:flex;gap:6px;flex-wrap:wrap}
 `;
     // ---- helpers --------------------------------------------------------------
     function fmt(n, digits = 2) {
@@ -1642,6 +1653,7 @@ function clientFactory(requireFn) {
         const [range, setRange] = React.useState('90');
         const [ccy, setCcy] = React.useState('CNY');
         const [tint, setTint] = React.useState(loadTint);
+        const [menuOpen, setMenuOpen] = React.useState(false);
         const cachedInitial = rangeCache.get('90');
         const [state, setState] = React.useState(cachedInitial !== undefined && Date.now() - cachedInitial.at < RANGE_CACHE_MS
             ? { status: 'ready', data: cachedInitial.data, error: null }
@@ -1650,6 +1662,16 @@ function clientFactory(requireFn) {
         const [attempt, setAttempt] = React.useState(0);
         const [modal, setModal] = React.useState(null);
         const [toast, setToast] = React.useState(null);
+        React.useEffect(() => {
+            if (!menuOpen)
+                return;
+            const onKey = (event) => {
+                if (event.key === 'Escape')
+                    setMenuOpen(false);
+            };
+            document.addEventListener('keydown', onKey);
+            return () => document.removeEventListener('keydown', onKey);
+        }, [menuOpen]);
         React.useEffect(() => {
             try {
                 window.localStorage.setItem(TINT_STORAGE, tint);
@@ -1760,19 +1782,43 @@ function clientFactory(requireFn) {
             className: 'dbr-chip' + (value === range ? ' active' : ''),
             'aria-pressed': value === range,
             onClick: () => setRange(value),
-        }, rangeLabel(t, value)))), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('page.currency') }, CURRENCIES.filter((value) => value === 'CNY' || rates[value] !== undefined).map((value) => h('button', {
+        }, rangeLabel(t, value)))), h('div', { className: 'dbr-menu-wrap' }, h('button', {
             type: 'button',
-            key: value,
-            className: 'dbr-chip' + (value === activeCcy ? ' active' : ''),
-            'aria-pressed': value === activeCcy,
-            onClick: () => setCcy(value),
-        }, value))), h('div', { className: 'dbr-chips', role: 'group', 'aria-label': t('page.tint') }, TINTS.map((value) => h('button', {
-            type: 'button',
-            key: value,
-            className: 'dbr-chip' + (value === tint ? ' active' : ''),
-            'aria-pressed': value === tint,
-            onClick: () => setTint(value),
-        }, t(tintKey(value))))), h('div', { className: 'dbr-page-meta', role: 'status', 'aria-live': 'polite' }, fetching ? h('span', { className: 'dbr-updating' }, t('dashboard.updating')) : null, priceTime !== null ? h('span', null, t('dashboard.pricesAsOf', { time: priceTime })) : null)), state.status === 'loading'
+            className: 'dbr-chip dbr-menu-btn' + (menuOpen ? ' active' : ''),
+            'aria-haspopup': 'menu',
+            'aria-expanded': menuOpen,
+            'aria-label': t('page.displayOptions'),
+            onClick: () => setMenuOpen((previous) => !previous),
+        }, activeCcy + ' · ' + t(tintKey(tint)), h('svg', {
+            width: 10,
+            height: 10,
+            viewBox: '0 0 16 16',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 2,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            'aria-hidden': true,
+        }, h('path', { d: 'm3 6 5 5 5-5' }))), menuOpen
+            ? h('div', {
+                className: 'dbr-menu-shade',
+                onClick: () => setMenuOpen(false),
+            })
+            : null, menuOpen
+            ? h('div', { className: 'dbr-menu', role: 'menu' }, h('div', { className: 'dbr-menu-sec' }, t('page.currency')), h('div', { className: 'dbr-menu-row' }, CURRENCIES.filter((value) => value === 'CNY' || rates[value] !== undefined).map((value) => h('button', {
+                type: 'button',
+                key: value,
+                className: 'dbr-chip' + (value === activeCcy ? ' active' : ''),
+                'aria-pressed': value === activeCcy,
+                onClick: () => setCcy(value),
+            }, value))), h('div', { className: 'dbr-menu-sec' }, t('page.tint')), h('div', { className: 'dbr-menu-row' }, TINTS.map((value) => h('button', {
+                type: 'button',
+                key: value,
+                className: 'dbr-chip' + (value === tint ? ' active' : ''),
+                'aria-pressed': value === tint,
+                onClick: () => setTint(value),
+            }, t(tintKey(value))))))
+            : null), h('div', { className: 'dbr-page-meta', role: 'status', 'aria-live': 'polite' }, fetching ? h('span', { className: 'dbr-updating' }, t('dashboard.updating')) : null, priceTime !== null ? h('span', null, t('dashboard.pricesAsOf', { time: priceTime })) : null)), state.status === 'loading'
             ? h('div', { className: 'dbr-page-grid' }, h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-skeleton' })))
             : state.status === 'error'
                 ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-page-err' }, h('div', { className: 'dbr-err' }, h('span', { className: 'dbr-code' }, state.error?.code ?? 'DEBRIEF_ERROR'), h('span', null, state.error?.message ?? '')), h('button', { type: 'button', className: 'dbr-more', onClick: () => setAttempt((previous) => previous + 1) }, t('page.retry'))))
