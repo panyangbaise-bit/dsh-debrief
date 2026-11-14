@@ -102,6 +102,8 @@ export const zh = {
   'dashboard.holdings': '持仓',
   'dashboard.positions': '{count} 持仓',
   'dashboard.hint': '添加持仓/自选：对 Agent 说「添加持仓/自选 + 标的 + 数量/关注价」，v2 走确认流。',
+  'dashboard.updating': '更新中',
+  'dashboard.pricesAsOf': '行情 {time}',
   'news.title': '新闻速览',
   'news.count': '{count} 条 · {fetchedAt}',
   'news.empty': '暂无新闻条目',
@@ -284,6 +286,8 @@ export const en: Record<keyof typeof zh, string> = {
   'dashboard.positions': '{count} positions',
   'dashboard.hint':
     'Add a holding or watchlist entry: tell the Agent "add … + instrument + quantity/target" (v2 confirmation flow).',
+  'dashboard.updating': 'Updating',
+  'dashboard.pricesAsOf': 'Quotes {time}',
   'news.title': 'News',
   'news.count': '{count} items · {fetchedAt}',
   'news.empty': 'No news items',
@@ -626,6 +630,7 @@ export function renderModel(kind: string, data: unknown): RenderModel {
           holdings: opt(arr(obj(POSITION_ROW))),
           watchlist: opt(arr(obj(WATCH_ROW))),
           fx: opt(obj({ base: opt(s()), asOf: opt(s()), rates: opt(obj({})), source: opt(s()) })),
+          pricesAsOf: opt(s()),
           pricesRefreshed: opt({ type: 'boolean' }),
           priceErrors: opt(arr(s())),
         }),
@@ -765,6 +770,9 @@ interface ClientCtx {
 const NS = 'dsh-debrief'
 const PANEL_ID = 'debrief-dashboard'
 const DASHBOARD_API = '/api/debrief/dashboard'
+/** Client-side payload cache so re-visiting a range paints immediately. */
+const RANGE_CACHE_MS = 30_000
+const rangeCache = new Map<string, { at: number; data: Record<string, unknown> }>()
 const RANGES = ['30', '90', '200', '365'] as const
 
 export function clientFactory(requireFn: (id: string) => unknown): unknown {
@@ -854,6 +862,10 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
 .dbr-chips{display:flex;gap:6px;flex-wrap:wrap}
 .dbr-chip{font-size:12px;padding:4px 12px;border-radius:999px;border:.5px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dbr-chip.active{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-bg-layer-1)}
+.dbr-page-meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.dbr-updating{display:inline-flex;align-items:center;gap:4px}
+.dbr-updating::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary);animation:dbr-pulse 1s ease-in-out infinite}
+@keyframes dbr-pulse{0%,100%{opacity:.25}50%{opacity:1}}
 .dbr-page-grid{display:grid;grid-template-columns:minmax(0,0.85fr) minmax(0,1.55fr);gap:12px}
 .dbr-page-grid .wide{grid-column:1/-1}
 .dbr-panel{background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius);padding:12px 14px;min-width:0}
@@ -2625,7 +2637,13 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
     const t = pickT(props.t)
     const [range, setRange] = React.useState<string>('90')
     const [ccy, setCcy] = React.useState<string>('CNY')
-    const [state, setState] = React.useState<PageState>({ status: 'loading', data: null, error: null })
+    const cachedInitial = rangeCache.get('90')
+    const [state, setState] = React.useState<PageState>(
+      cachedInitial !== undefined && Date.now() - cachedInitial.at < RANGE_CACHE_MS
+        ? { status: 'ready', data: cachedInitial.data, error: null }
+        : { status: 'loading', data: null, error: null },
+    )
+    const [fetching, setFetching] = React.useState(false)
     const [attempt, setAttempt] = React.useState(0)
     const [modal, setModal] = React.useState<ModalState | null>(null)
     const [toast, setToast] = React.useState<{ id: number; tone: 'ok' | 'error'; text: string } | null>(null)
@@ -2645,25 +2663,47 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
     React.useEffect(() => {
       let cancelled = false
       const controller = new AbortController()
-      setState({ status: 'loading', data: null, error: null })
+      const hit = rangeCache.get(range)
+      if (hit !== undefined && Date.now() - hit.at < RANGE_CACHE_MS) {
+        setState({ status: 'ready', data: hit.data, error: null })
+        setFetching(false)
+        return () => {
+          cancelled = true
+          controller.abort()
+        }
+      }
+      // Keep the previous payload on screen while the next range loads: a
+      // full skeleton for 3 s on every chip click reads as "broken".
+      setFetching(true)
+      setState((previous) => (previous.data === null ? { status: 'loading', data: null, error: null } : previous))
       fetch(`${DASHBOARD_API}?range=${range}`, { signal: controller.signal })
         .then(async (response) => {
           const body = (await response.json()) as Record<string, unknown>
           if (cancelled) return
-          if (body.ok === true)
-            setState({ status: 'ready', data: (body.data ?? null) as Record<string, unknown> | null, error: null })
-          else {
+          setFetching(false)
+          if (body.ok === true) {
+            const data = (body.data ?? null) as Record<string, unknown> | null
+            if (data !== null) rangeCache.set(range, { at: Date.now(), data })
+            setState({ status: 'ready', data, error: null })
+          } else {
             const error = (body.error ?? { code: 'DEBRIEF_ERROR', message: 'kernel error' }) as {
               code: string
               message: string
             }
-            setState({ status: 'error', data: null, error })
+            setState((previous) =>
+              previous.data === null ? { status: 'error', data: null, error } : { ...previous, error },
+            )
           }
         })
         .catch((error: unknown) => {
           if (cancelled) return
           if (error instanceof DOMException && error.name === 'AbortError') return
-          setState({ status: 'error', data: null, error: { code: 'DEBRIEF_NETWORK', message: String(error) } })
+          setFetching(false)
+          setState((previous) =>
+            previous.data === null
+              ? { status: 'error', data: null, error: { code: 'DEBRIEF_NETWORK', message: String(error) } }
+              : previous,
+          )
         })
       return () => {
         cancelled = true
@@ -2704,6 +2744,12 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
       return parsed !== null && !Number.isNaN(parsed.getTime())
         ? parsed.toLocaleTimeString('zh-CN')
         : new Date().toLocaleTimeString('zh-CN')
+    })()
+    /** Quote fetch time (kernel `pricesAsOf`), not the payload build time. */
+    const priceTime = (() => {
+      const asOf = record?.pricesAsOf
+      const parsed = typeof asOf === 'string' ? new Date(asOf) : null
+      return parsed !== null && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleString('zh-CN') : null
     })()
 
     return h(
@@ -2746,6 +2792,12 @@ export function clientFactory(requireFn: (id: string) => unknown): unknown {
               value,
             ),
           ),
+        ),
+        h(
+          'div',
+          { className: 'dbr-page-meta', role: 'status', 'aria-live': 'polite' },
+          fetching ? h('span', { className: 'dbr-updating' }, t('dashboard.updating')) : null,
+          priceTime !== null ? h('span', null, t('dashboard.pricesAsOf', { time: priceTime })) : null,
         ),
       ),
       state.status === 'loading'

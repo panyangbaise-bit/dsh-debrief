@@ -53,15 +53,40 @@ SCHEDULE = [
 ]
 
 
-def _register_adapters():
+SUPPORTED_MARKETS = ("US", "CN", "HK", "CRYPTO")
+
+
+def _register_adapters(markets=None):
+    """Register market adapters, importing collector modules only when needed.
+
+    `markets` narrows the import set on purpose: the CN/HK adapters pull in
+    akshare + pandas (≈3 s of imports cold), so a dashboard that only needs a
+    US quote must never import them. Omitting `markets` registers every
+    supported market (the scheduled worker's behaviour).
+    """
     global _adapters_registered, _registry
-    if _adapters_registered:
+    wanted = {str(market).upper() for market in markets} if markets else set(SUPPORTED_MARKETS)
+    wanted &= set(SUPPORTED_MARKETS)
+    if _adapters_registered and wanted <= set(_registry.markets):
         return _registry
     try:
         from adapters.base import registry
-        from adapters.cn_market import CNMarketAdapter, HKMarketAdapter
-        from adapters.crypto import CryptoAdapter
-        from adapters.us_market import USMarketAdapter
+
+        if "US" in wanted and "US" not in registry.markets:
+            from adapters.us_market import USMarketAdapter
+
+            registry.register("US", USMarketAdapter())
+        if (wanted & {"CN", "HK"}) - set(registry.markets):
+            from adapters.cn_market import CNMarketAdapter, HKMarketAdapter
+
+            if "CN" in wanted and "CN" not in registry.markets:
+                registry.register("CN", CNMarketAdapter())
+            if "HK" in wanted and "HK" not in registry.markets:
+                registry.register("HK", HKMarketAdapter())
+        if "CRYPTO" in wanted and "CRYPTO" not in registry.markets:
+            from adapters.crypto import CryptoAdapter
+
+            registry.register("CRYPTO", CryptoAdapter())
     except ModuleNotFoundError as exc:
         # Slim wheel installs carry the CLI only; the collectors extra needs
         # the full source install for market adapters.
@@ -71,13 +96,6 @@ def _register_adapters():
             "from the full source checkout (the slim wheel has no adapters/)"
         ) from None
 
-    for market, adapter in (
-        ("US", USMarketAdapter()),
-        ("CN", CNMarketAdapter()),
-        ("HK", HKMarketAdapter()),
-        ("CRYPTO", CryptoAdapter()),
-    ):
-        registry.register(market, adapter)
     _adapters_registered = True
     _registry = registry
     return registry
@@ -224,10 +242,6 @@ def refresh_stale_prices(session: Session, targets, force: bool = False) -> dict
     targets = sorted({(str(m).upper(), str(t).upper()) for m, t in targets})
     if not targets:
         return {"refreshed": 0, "failed": [], "available": True}
-    try:
-        registry = _register_adapters()
-    except (ModuleNotFoundError, ImportError, RuntimeError):
-        return {"refreshed": 0, "failed": [], "available": False}
 
     # SQLite returns naive datetimes — compare against naive UTC.
     cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
@@ -248,6 +262,17 @@ def refresh_stale_prices(session: Session, targets, force: bool = False) -> dict
         # first live quote on the next read, not wait for the cron job).
         if latest is None or latest.fetched_at is None or latest.fetched_at < cutoff:
             stale_targets.append((market, ticker))
+
+    # Nothing to fetch: return before importing any collector module. The
+    # dashboard hits this path on every view inside PRICE_STALE_SECONDS, and
+    # akshare/yfinance imports are the single most expensive thing in it.
+    if not stale_targets:
+        return {"refreshed": 0, "failed": [], "available": True}
+
+    try:
+        registry = _register_adapters({market for market, _ in stale_targets})
+    except (ModuleNotFoundError, ImportError, RuntimeError):
+        return {"refreshed": 0, "failed": [], "available": False}
 
     def fetch(market_ticker):
         market, ticker = market_ticker

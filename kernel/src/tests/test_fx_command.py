@@ -5,6 +5,14 @@ import pytest
 import adapters.fx as fx_module
 
 
+@pytest.fixture(autouse=True)
+def _reset_fx_cache():
+    """Each test starts with a cold provider cache."""
+    fx_module.reset_cache()
+    yield
+    fx_module.reset_cache()
+
+
 class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -94,3 +102,35 @@ def test_cli_fx_provider_failure_envelope(run_cli, monkeypatch):
     assert payload["error"]["code"] == "DEBRIEF_FX_UNAVAILABLE"
     assert "DEBRIEF_FX_" in payload["error"]["message"]
     assert "connectivity" in payload["error"]["message"]
+
+
+def test_provider_answer_is_cached_within_the_process(monkeypatch):
+    calls = []
+
+    def get(url, timeout):
+        calls.append(url)
+        return FakeResponse(PROVIDER)
+
+    monkeypatch.setattr(fx_module.requests, "get", get)
+    first = fx_module.get_rates("CNY")
+    second = fx_module.get_rates("USD")
+    assert len(calls) == 1  # one dashboard build, one HTTP call
+    assert first["asOf"] == second["asOf"]
+    fx_module.reset_cache()
+    fx_module.get_rates("CNY")
+    assert len(calls) == 2
+
+
+def test_cny_rates_reuse_the_same_provider_call(monkeypatch):
+    calls = []
+
+    def get(url, timeout):
+        calls.append(url)
+        return FakeResponse(PROVIDER)
+
+    monkeypatch.setattr(fx_module.requests, "get", get)
+    rates = fx_module.get_cny_rates(("US", "HK", "CN"))
+    assert rates["CN"] == 1.0
+    assert rates["US"] == pytest.approx(7.0)
+    assert rates["HK"] == pytest.approx(0.92)
+    assert len(calls) == 1

@@ -19,17 +19,20 @@
       chatId: '-100…' # 可选；接收推送的 chat id
 ```
 
-| 配置项                 | 类型                      | 默认                     | 说明                                                                                                                                     |
-| ---------------------- | ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `cliPath`              | string                    | 未设置                   | 内核 CLI 的绝对路径或 PATH 名（external 模式；auto 模式的优先选择）。指向 `mock/debrief.js` 即可本地演示。                               |
-| `kernelMode`           | `auto\|external\|managed` | `auto`                   | `auto`：显式 cliPath/`DEBRIEF_CLI_PATH` 优先 external，否则自举；`external`：始终用 cliPath（服务器部署）；`managed`：始终自举内置内核。 |
-| `dataDir`              | string                    | `~/.dsh/debrief-runtime` | 自举 venv 与 marker 的运行时目录（managed 模式）；环境变量 `DEBRIEF_DATA_DIR` 兜底。                                                     |
-| `withCollectors`       | boolean                   | `false`                  | 自举完成后额外从 PyPI 联网安装 `portfolio_agent_kernel[collectors]`（采集依赖，可选；失败不阻断核心读写；实时行情刷新需要它）。          |
-| `timeoutMs`            | number                    | `15000`                  | 单次内核调用超时（毫秒），超时返回 `DEBRIEF_TIMEOUT`。                                                                                   |
-| `enableSetup`          | boolean                   | `true`                   | 是否注册 `debrief-setup` 人类命令（幂等注册 8 个定时任务）。                                                                             |
-| `enableDashboardRoute` | boolean                   | `true`                   | 是否注册只读路由 `/api/debrief/dashboard?range=30\|90\|200\|365`（经 DSH 认证的 connection fetch 通道，仅 owner cookie 可达）。          |
-| `telegram.botToken`    | string                    | 未设置                   | Telegram Bot token；与 chatId 同时设置即启用推送（复盘发布、新闻新增、提醒比对、`notify test`）。注入为内核 `TELEGRAM_BOT_TOKEN`。       |
-| `telegram.chatId`      | string                    | 未设置                   | 接收推送的 chat id（私聊数字 id 或频道 `@channel`）；注入为内核 `TELEGRAM_CHAT_ID`。                                                     |
+| 配置项                 | 类型                        | 默认                     | 说明                                                                                                                                     |
+| ---------------------- | --------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `cliPath`              | string                      | 未设置                   | 内核 CLI 的绝对路径或 PATH 名（external 模式；auto 模式的优先选择）。指向 `mock/debrief.js` 即可本地演示。                               |
+| `kernelMode`           | `auto\|external\|managed`   | `auto`                   | `auto`：显式 cliPath/`DEBRIEF_CLI_PATH` 优先 external，否则自举；`external`：始终用 cliPath（服务器部署）；`managed`：始终自举内置内核。 |
+| `dataDir`              | string                      | `~/.dsh/debrief-runtime` | 自举 venv 与 marker 的运行时目录（managed 模式）；环境变量 `DEBRIEF_DATA_DIR` 兜底。                                                     |
+| `withCollectors`       | boolean                     | `false`                  | 自举完成后额外从 PyPI 联网安装 `portfolio_agent_kernel[collectors]`（采集依赖，可选；失败不阻断核心读写；实时行情刷新需要它）。          |
+| `timeoutMs`            | number                      | `15000`                  | 单次内核调用超时（毫秒），超时返回 `DEBRIEF_TIMEOUT`。                                                                                   |
+| `enableSetup`          | boolean                     | `true`                   | 是否注册 `debrief-setup` 人类命令（幂等注册 8 个定时任务）。                                                                             |
+| `enableDashboardRoute` | boolean                     | `true`                   | 是否注册只读路由 `/api/debrief/dashboard?range=30\|90\|200\|365`（经 DSH 认证的 connection fetch 通道，仅 owner cookie 可达）。          |
+| `dashboardCacheMs`     | number                      | `20000`                  | 路由 payload 的内存缓存时长（毫秒，0 关闭）；同 range 的并发请求合并为一次内核调用。                                                     |
+| `dashboardRefresh`     | `background\|inline\|never` | `background`             | 读时行情刷新策略：默认先返回缓存价、后台刷新；`inline` 阻塞等待实时刷新（旧行为）；`never` 只读缓存（由定时 worker 负责新鲜度）。        |
+| `pycachePrefix`        | string                      | `<dataDir>/pycache`      | 注入内核子进程的 `PYTHONPYCACHEPREFIX`：只读 venv 也能落字节码缓存；空串关闭。环境变量 `DEBRIEF_PYCACHE_PREFIX` 兜底。                   |
+| `telegram.botToken`    | string                      | 未设置                   | Telegram Bot token；与 chatId 同时设置即启用推送（复盘发布、新闻新增、提醒比对、`notify test`）。注入为内核 `TELEGRAM_BOT_TOKEN`。       |
+| `telegram.chatId`      | string                      | 未设置                   | 接收推送的 chat id（私聊数字 id 或频道 `@channel`）；注入为内核 `TELEGRAM_CHAT_ID`。                                                     |
 
 未在 schema 内的字段会被忽略。插件不持久化配置：修改 profile patch 由用户自行编辑。
 

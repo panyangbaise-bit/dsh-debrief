@@ -18,6 +18,7 @@ import {
   detectBootstrapTool,
   ensureKernel,
   findKernelWheel,
+  pycachePrefixFor,
   resolveKernelEnv,
   resolveKernelMode,
   wheelsDir,
@@ -186,6 +187,26 @@ describe('kernel subprocess environment', () => {
       ...env,
       DATABASE_URL: 'sqlite:////tmp/data/portfolio.db',
     })
+  })
+
+  it('injects PYTHONPYCACHEPREFIX so a read-only venv can persist .pyc files', () => {
+    expect(resolveKernelEnv(external, { PATH: '/usr/bin' }, undefined, '/tmp/pycache').PYTHONPYCACHEPREFIX).toBe(
+      '/tmp/pycache',
+    )
+    // An operator-provided prefix always wins.
+    expect(
+      resolveKernelEnv(external, { PYTHONPYCACHEPREFIX: '/own' }, undefined, '/tmp/pycache').PYTHONPYCACHEPREFIX,
+    ).toBe('/own')
+    // Undefined / empty disables the overlay entirely.
+    expect(resolveKernelEnv(external, { PATH: '/usr/bin' }, undefined, undefined)).toEqual({ PATH: '/usr/bin' })
+    expect(resolveKernelEnv(external, { PATH: '/usr/bin' }, undefined, '')).toEqual({ PATH: '/usr/bin' })
+  })
+
+  it('derives the default pycache prefix from the data directory', () => {
+    expect(pycachePrefixFor({ dataDir: '/tmp/data' }, {})).toBe('/tmp/data/pycache')
+    expect(pycachePrefixFor({ dataDir: '/tmp/data', pycachePrefix: '/custom' }, {})).toBe('/custom')
+    expect(pycachePrefixFor({ dataDir: '/tmp/data', pycachePrefix: '' }, {})).toBeUndefined()
+    expect(pycachePrefixFor({}, { DEBRIEF_DATA_DIR: '/tmp/env-data' })).toBe('/tmp/env-data/pycache')
   })
 })
 

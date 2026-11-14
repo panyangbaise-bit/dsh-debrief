@@ -320,7 +320,10 @@ def test_dashboard_schema(seeded_db, run_cli):
     )
     assert code == 0
     data = payload["data"]
-    assert set(data) == {"kpis", "series", "composition", "holdings", "watchlist", "fx", "pricesRefreshed"}
+    assert set(data) == {
+        "kpis", "series", "composition", "holdings", "watchlist", "fx", "pricesAsOf", "pricesRefreshed",
+    }
+    assert data["pricesAsOf"] is None or isinstance(data["pricesAsOf"], str)
     assert data["pricesRefreshed"] is True
     assert data["fx"]["base"] == "CNY"
     assert set(data["fx"]) == {"base", "asOf", "rates", "source"}

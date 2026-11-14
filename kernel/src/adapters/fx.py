@@ -2,8 +2,9 @@
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import requests
 
@@ -15,15 +16,62 @@ logger = logging.getLogger(__name__)
 FX_RATES: Dict[str, float] = {}
 
 _FX_URL = "https://open.er-api.com/v6/latest/{}"
+_FX_TIMEOUT = float(os.environ.get("DEBRIEF_FX_TIMEOUT", "5"))
+
+# One dashboard build asks for the same table three times (holdings, rates,
+# fx panel). Caching the provider answer keeps that at exactly one HTTP call;
+# the TTL also keeps a long-lived worker process from hammering the provider.
+FX_CACHE_TTL_SECONDS = float(os.environ.get("DEBRIEF_FX_CACHE_SECONDS", "3600"))
+
+# (monotonic seconds at fetch, UTC ISO timestamp, units_per_1_cny)
+_units_cache: Optional[Tuple[float, str, Dict[str, float]]] = None
+
+
+def reset_cache() -> None:
+    """Drop the process-local provider cache (tests, forced refresh)."""
+    global _units_cache
+    _units_cache = None
+
+
+def _provider_units() -> Tuple[str, Dict[str, float]]:
+    """(asOf, units_per_1_cny) from open.er-api.com, cached for the TTL.
+
+    Raises ValueError when the provider is unreachable or unsuccessful; a
+    failed refresh never poisons the cache.
+    """
+    global _units_cache
+    if _units_cache is not None:
+        fetched_at, as_of, units = _units_cache
+        if (time.monotonic() - fetched_at) < FX_CACHE_TTL_SECONDS:
+            return as_of, units
+    try:
+        response = requests.get(_FX_URL.format("CNY"), timeout=_FX_TIMEOUT)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise ValueError(f"FX provider unavailable: {exc}") from None
+    if payload.get("result") != "success":
+        raise ValueError("FX provider returned an unsuccessful response")
+
+    units: Dict[str, float] = {"CNY": 1.0}
+    for ccy, rate in (payload.get("rates") or {}).items():
+        try:
+            units[str(ccy).upper()] = float(rate)
+        except (TypeError, ValueError):
+            continue
+    as_of = datetime.now(timezone.utc).isoformat()
+    _units_cache = (time.monotonic(), as_of, units)
+    return as_of, units
 
 
 def _fetch_rate(base_currency: str) -> float:
-    response = requests.get(_FX_URL.format(base_currency), timeout=2)
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get("result") != "success":
-        raise ValueError("FX provider returned an unsuccessful response")
-    return float(payload["rates"]["CNY"])
+    """CNY per 1 unit of `base_currency` (shares the provider cache)."""
+    ccy = (base_currency or "").upper()
+    _, units = _provider_units()
+    rate = units.get(ccy)
+    if rate is None or rate <= 0:
+        raise ValueError(f"no FX rate for {ccy}")
+    return 1.0 / rate
 
 
 def get_rates(base: str = "CNY") -> Dict:
@@ -38,21 +86,8 @@ def get_rates(base: str = "CNY") -> Dict:
     Raises ValueError when the provider fails or the base is unavailable.
     """
     base = (base or "CNY").upper()
-    try:
-        response = requests.get(_FX_URL.format("CNY"), timeout=10)
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:
-        raise ValueError(f"FX provider unavailable: {exc}") from None
-    if payload.get("result") != "success":
-        raise ValueError("FX provider returned an unsuccessful response")
-
-    units_per_1_cny: Dict[str, float] = {"CNY": 1.0}
-    for ccy, rate in (payload.get("rates") or {}).items():
-        try:
-            units_per_1_cny[str(ccy).upper()] = float(rate)
-        except (TypeError, ValueError):
-            continue
+    as_of, units = _provider_units()
+    units_per_1_cny: Dict[str, float] = dict(units)
 
     # Env overrides applied to the CNY base: DEBRIEF_FX_<CCY> = CNY per 1 CCY.
     for key, value in os.environ.items():
@@ -70,12 +105,12 @@ def get_rates(base: str = "CNY") -> Dict:
         raise ValueError(f"no FX rate for base currency {base}")
     base_units = units_per_1_cny[base]
     rates = {
-        ccy: round(units / base_units, 8)
-        for ccy, units in units_per_1_cny.items()
+        ccy: round(units_ / base_units, 8)
+        for ccy, units_ in units_per_1_cny.items()
     }
     return {
         "base": base,
-        "asOf": datetime.now(timezone.utc).isoformat(),
+        "asOf": as_of,
         "rates": rates,
         "source": "open.er-api.com",
     }

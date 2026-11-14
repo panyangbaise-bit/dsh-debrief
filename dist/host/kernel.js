@@ -72,13 +72,22 @@ export function managedDbUrl(dataDir) {
  * Non-empty `telegram` credentials are additionally overlaid as
  * `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` (existing env values are never
  * wiped when the config omits or empties a value).
+ *
+ * `pycachePrefix` is overlaid as `PYTHONPYCACHEPREFIX` (existing values win).
+ * Without it a read-only venv — the common server deployment, where the venv
+ * is root-owned and the Host runs as another user — cannot persist `.pyc`
+ * files, and every cold `debrief` call recompiles pandas/akshare from source
+ * (~2-3 s per page view).
  */
-export function resolveKernelEnv(kernel, env, telegram) {
+export function resolveKernelEnv(kernel, env, telegram, pycachePrefix) {
     let resolved = { ...env };
     if (kernel.mode === 'managed' &&
         kernel.dbUrl !== undefined &&
         (env.DATABASE_URL === undefined || env.DATABASE_URL === '')) {
         resolved = { ...resolved, DATABASE_URL: kernel.dbUrl };
+    }
+    if (pycachePrefix !== undefined && pycachePrefix !== '' && !resolved.PYTHONPYCACHEPREFIX) {
+        resolved = { ...resolved, PYTHONPYCACHEPREFIX: pycachePrefix };
     }
     if (telegram?.botToken !== undefined && telegram.botToken !== '') {
         resolved = { ...resolved, TELEGRAM_BOT_TOKEN: telegram.botToken };
@@ -87,6 +96,16 @@ export function resolveKernelEnv(kernel, env, telegram) {
         resolved = { ...resolved, TELEGRAM_CHAT_ID: telegram.chatId };
     }
     return resolved;
+}
+/**
+ * Writable bytecode-cache directory for kernel subprocesses: Config
+ * `pycachePrefix`, else `<dataDir>/pycache`, else `<homedir>/.dsh/
+ * debrief-runtime/pycache`. An empty configured string disables it.
+ */
+export function pycachePrefixFor(config, env) {
+    if (config.pycachePrefix === '')
+        return undefined;
+    return config.pycachePrefix ?? join(runtimeDataDir(config, env), 'pycache');
 }
 const venvBin = (dataDir) => join(dataDir, 'venv', process.platform === 'win32' ? 'Scripts' : 'bin');
 const markerPath = (dataDir) => join(dataDir, 'kernel.json');
@@ -148,6 +167,26 @@ export function execQuiet(command, args, options = {}) {
             });
         });
     });
+}
+/**
+ * Precompile a managed venv's library tree.
+ *
+ * pandas + numpy + akshare are ≈4 000 modules; without `.pyc` on disk every
+ * cold `debrief` subprocess recompiles them from source (≈2-3 s, ~100 MB
+ * RSS). Non-fatal by design: the runtime `PYTHONPYCACHEPREFIX` overlay still
+ * keeps the compiler out of the hot path.
+ */
+async function compileVenv(dataDir, venvPython, env, exec) {
+    for (const lib of [join(dataDir, 'venv', 'lib'), join(dataDir, 'venv', 'Lib')]) {
+        if (!existsSync(lib))
+            continue;
+        try {
+            await exec(venvPython, ['-m', 'compileall', '-q', '-j', '0', lib], { env, timeoutMs: 300000 });
+        }
+        catch {
+            /* best effort — a failed compile only costs cold-start time */
+        }
+    }
 }
 /** Prefer uv; fall back to python3.13/3.12/3.11 with a version check. */
 export async function detectBootstrapTool(env, exec = execQuiet) {
@@ -316,6 +355,9 @@ async function bootstrapManaged(config, dataDir, env, exec, wheelDir) {
                     'pip',
                     'install',
                     '--no-cache',
+                    // Python >=3.12: write .pyc at install time. Without it a read-only
+                    // venv makes every cold `debrief` call recompile the collectors.
+                    '--compile',
                     '--python',
                     venvPython,
                     '--no-index',
@@ -377,6 +419,8 @@ async function bootstrapManaged(config, dataDir, env, exec, wheelDir) {
                 console.warn('[dsh-debrief] collectors 安装失败（不影响核心读写命令）：', collectors.error ?? collectors.stderr);
             }
         }
+        // Bytecode is written last so the collectors extra is covered too.
+        await compileVenv(dataDir, venvPython, env, exec);
         const cliPath = existsSync(venvDebrief) ? venvDebrief : venvPython;
         const prefixArgs = existsSync(venvDebrief) ? [] : ['-m', 'debrief.cli'];
         try {

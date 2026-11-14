@@ -11,7 +11,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WHEELS_DIR = REPO_ROOT.parent / "wheels"  # bundled with the npm package (kernel/wheels/)
-WHEEL_VERSION = "0.2.3"  # bump on EVERY wheel content change (cache-key rule)
+WHEEL_VERSION = "0.3.0"  # bump on EVERY wheel content change (cache-key rule)
 COLLECTOR_MODULES = (
     "yfinance",
     "akshare",

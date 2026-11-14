@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from adapters.fx import get_rates
@@ -51,8 +51,13 @@ def _refresh_meta(refresh, session, targets) -> dict:
     return meta
 
 
-def cny_rates(markets: list[str]) -> dict[str, float]:
-    """CNY conversion rates for the given markets (env override first)."""
+def cny_rates(markets: list[str], cross_rates: Optional[dict] = None) -> dict[str, float]:
+    """CNY conversion rates (CNY per 1 unit) for the given markets.
+
+    `cross_rates` is a `get_rates()` table (units per 1 CNY) the caller has
+    already fetched; reusing it keeps one dashboard build at a single FX HTTP
+    call instead of one per consumer.
+    """
     rates: dict[str, float] = {}
     missing = []
     for market in sorted({m.upper() for m in markets}):
@@ -66,6 +71,13 @@ def cny_rates(markets: list[str]) -> dict[str, float]:
                 rates[market] = float(env_value)
                 continue
             except ValueError:
+                pass
+        cross = (cross_rates or {}).get(base)
+        if cross:
+            try:
+                rates[market] = 1.0 / float(cross)
+                continue
+            except (TypeError, ValueError, ZeroDivisionError):
                 pass
         missing.append(market)
     if missing:
@@ -104,8 +116,26 @@ def _open_holdings(session: Session, status: Optional[str]) -> list[Holding]:
     return session.query(Holding).filter(Holding.status == "open").all()
 
 
+def _prices_as_of(session: Session) -> Optional[str]:
+    """Latest quote fetch time across the price cache (UTC ISO-8601), or None.
+
+    Lets the UI state how old the quoted prices are when a read serves cached
+    prices instead of refreshing live.
+    """
+    value = session.scalar(select(func.max(PriceCache.fetched_at)))
+    if value is None:
+        return None
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
+
+
 def build_holdings_payload(
-    session: Session, status: Optional[str] = None, *, refresh: Optional[bool] = None
+    session: Session,
+    status: Optional[str] = None,
+    *,
+    refresh: Optional[bool] = None,
+    cross_rates: Optional[dict] = None,
 ) -> dict:
     holdings = _open_holdings(session, status)
     refresh_meta = _refresh_meta(
@@ -126,7 +156,7 @@ def build_holdings_payload(
             **refresh_meta,
         }
     markets = {h.market for h in holdings}
-    rates = cny_rates(list(markets))
+    rates = cny_rates(list(markets), cross_rates=cross_rates)
 
     positions, native_values, day_pnl = [], [], 0.0
     for holding in holdings:
@@ -282,12 +312,23 @@ def _fmt_time(dt) -> str:
 def build_dashboard_payload(
     session: Session, range_days: int, *, refresh: Optional[bool] = None
 ) -> dict:
+    # One FX fetch feeds both the holdings conversion and the fx panel; the
+    # provider answer is itself cached for FX_CACHE_TTL_SECONDS.
+    fx = None
+    try:
+        fx = get_rates("CNY")
+    except Exception:
+        fx = None
+    cross_rates = (fx or {}).get("rates") or {}
+
     # Inner builders skip their own refresh — the dashboard refreshes the
     # union of holdings + watchlist exactly once and reports it at top level.
-    holdings_payload = build_holdings_payload(session, status="open", refresh=False)
+    holdings_payload = build_holdings_payload(
+        session, status="open", refresh=False, cross_rates=cross_rates
+    )
     watchlist_payload = build_watchlist_payload(session, refresh=False)
     open_holdings = session.query(Holding).filter(Holding.status == "open").all()
-    rates = cny_rates(list({h.market for h in open_holdings}) or ["CN"])
+    rates = cny_rates(list({h.market for h in open_holdings}) or ["CN"], cross_rates=cross_rates)
 
     refresh_targets = {(h.market.upper(), h.ticker.upper()) for h in open_holdings}
     refresh_targets |= {
@@ -297,12 +338,6 @@ def build_dashboard_payload(
         .all()
     }
     refresh_meta = _refresh_meta(refresh, session, refresh_targets)
-
-    fx = None
-    try:
-        fx = get_rates("CNY")
-    except Exception:
-        fx = None
 
     # Equity series from daily price_cache snapshots (carry-forward per ticker).
     start_date = (datetime.now(timezone.utc) - timedelta(days=range_days)).date()
@@ -380,5 +415,6 @@ def build_dashboard_payload(
         "holdings": holdings_payload["positions"],
         "watchlist": watchlist_payload["items"],
         "fx": fx,
+        "pricesAsOf": _prices_as_of(session),
         **refresh_meta,
     }

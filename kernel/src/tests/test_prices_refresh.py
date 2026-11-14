@@ -34,7 +34,7 @@ class FakeAdapter:
         return {"ticker": ticker, "price": self.price, "currency": "CNY", "source": "fake"}
 
 
-def _fake_registry():
+def _fake_registry(markets=None):
     from adapters.base import AdapterRegistry
 
     registry = AdapterRegistry()
@@ -170,7 +170,7 @@ def test_missing_adapters_degrades_to_cached(db, monkeypatch):
     monkeypatch.setattr(worker, "_adapters_registered", False)
     monkeypatch.setattr(worker, "_registry", None)
 
-    def no_collectors():
+    def no_collectors(markets=None):
         raise ModuleNotFoundError("No module named 'yfinance'")
 
     monkeypatch.setattr("debrief.worker._register_adapters", no_collectors)
@@ -190,7 +190,7 @@ def test_adapter_failure_reported_as_price_errors(db, monkeypatch):
         def get_price(self, ticker):
             raise ConnectionError("upstream down")
 
-    def broken_registry():
+    def broken_registry(markets=None):
         from adapters.base import AdapterRegistry
 
         registry = AdapterRegistry()
@@ -208,3 +208,34 @@ def test_adapter_failure_reported_as_price_errors(db, monkeypatch):
     assert payload["pricesRefreshed"] is True
     assert payload["priceErrors"] == ["CN:600519:ConnectionError"]
     assert payload["positions"][0]["price"] == 1412.0  # cached price retained
+
+
+def test_fresh_rows_never_import_collectors(db, monkeypatch):
+    """The dashboard's common path must not pay the akshare/yfinance import tax."""
+    imported = []
+
+    def boom(markets=None):
+        imported.append(markets)
+        raise ModuleNotFoundError("should not be imported for a fresh row")
+
+    monkeypatch.setattr("debrief.worker._register_adapters", boom)
+    with Session(db) as session:
+        _seed_holding(session, fetched_at=_naive_now())
+        payload = build_holdings_payload(session)
+    assert imported == []
+    assert payload["pricesRefreshed"] is True
+    assert payload["positions"][0]["price"] == 1412.0
+
+
+def test_only_the_stale_markets_are_registered(db, monkeypatch):
+    seen = []
+
+    def registry_for(markets=None):
+        seen.append(set(markets or ()))
+        return _fake_registry()
+
+    monkeypatch.setattr("debrief.worker._register_adapters", registry_for)
+    with Session(db) as session:
+        _seed_holding(session, fetched_at=_stale())
+        build_holdings_payload(session)
+    assert seen == [{"CN"}]

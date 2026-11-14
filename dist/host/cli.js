@@ -7,7 +7,7 @@
  * canonical envelope, so a failed call is a structured value, never a throw.
  */
 import { spawn } from 'node:child_process';
-import { ensureKernel, resolveKernelEnv } from './kernel.js';
+import { ensureKernel, pycachePrefixFor, resolveKernelEnv } from './kernel.js';
 const EXEC_ERROR_CODES = {
     ETIMEDOUT: 'DEBRIEF_TIMEOUT',
     ENOENT: 'DEBRIEF_CLI_NOT_FOUND',
@@ -63,7 +63,7 @@ function runCliResolved(kernel, config, args, options) {
         let child;
         try {
             child = spawn(kernel.cliPath, [...kernel.prefixArgs, ...args, '--json'], {
-                env: resolveKernelEnv(kernel, process.env, config.telegram),
+                env: resolveKernelEnv(kernel, process.env, config.telegram, pycachePrefixFor(config, process.env)),
                 stdio: ['pipe', 'pipe', 'pipe'],
             });
         }

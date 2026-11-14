@@ -9,6 +9,51 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Dashboard payload freshness** — the dashboard payload carries `pricesAsOf`
+  (latest `price_cache.fetched_at`, UTC ISO-8601) so the page can state how old
+  a cached quote is; the Portfolio header renders it next to the range chips.
+- **Dashboard route cache** — `/api/debrief/dashboard` keeps a short-lived
+  in-memory payload per range (`dashboardCacheMs`, default 20 s), collapses
+  concurrent misses into one kernel call, and answers from cached prices while
+  a background refresh keeps the next view fresh (`dashboardRefresh`:
+  `background` default / `inline` / `never`, at most one refresh per 60 s).
+  A kernel failure now serves the last good payload instead of an error card.
+- **`pycachePrefix`** — kernel subprocesses get `PYTHONPYCACHEPREFIX`
+  (default `<dataDir>/pycache`) so a read-only, root-owned venv no longer
+  recompiles pandas/akshare on every call. Bootstrap installs with
+  `uv pip install --compile` and runs `compileall` over the venv afterwards.
+
+### Performance
+
+- **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three
+  independent causes were removed:
+  - adapters were imported before the staleness check, so every view paid the
+    akshare/yfinance import tax even when no quote needed refreshing; the
+    refresh now returns before importing anything and registers only the
+    markets that actually have a stale target (`_register_adapters(markets)`);
+  - the collectors were installed without bytecode, into a root-owned venv the
+    Host cannot write to, so Python recompiled ≈2 000 modules per request
+    (pandas 1 440 / numpy 487 / akshare 398 / yfinance 34 had no `.pyc`);
+  - the page blocked on a live quote fetch, three FX HTTP calls and a fresh
+    subprocess on every view.
+- **One FX call per dashboard build** — the provider answer is cached in
+  process (`DEBRIEF_FX_CACHE_SECONDS`, default 3600) and reused by the holdings
+  conversion and the fx panel instead of three separate requests;
+  `DEBRIEF_FX_TIMEOUT` (default 5 s) bounds a hung provider.
+
+### Changed
+
+- Dashboard reads default to `--no-refresh`; quote freshness is owned by the
+  background refresh (or the scheduled worker). `dashboardRefresh: inline`
+  restores the pre-0.3 blocking behaviour.
+- The Portfolio page keeps the previous payload on screen while another range
+  loads (plus a per-range client cache) instead of blanking to a skeleton.
+- Kernel wheel `portfolio_agent_kernel-0.3.0` ships the full adapter/scheduler/
+  notifier surface that `debrief worker` needs (the previous build script
+  produced a slim wheel that did not match the committed artifact).
+
+### Added
+
 - **Live news read path** — the kernel gains the missing `news latest` command
   (the `debrief_news` tool previously targeted a nonexistent CLI subcommand and
   always returned `DEBRIEF_USAGE`). `news latest` fetches WallStreetCN live,

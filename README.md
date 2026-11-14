@@ -105,6 +105,9 @@ bash examples/demo.sh
 | `timeoutMs`            | `15000`                                         | Per-call timeout / 单次调用超时                                               |
 | `enableSetup`          | `true`                                          | Register the `debrief-setup` command / 注册 `debrief-setup` 命令              |
 | `enableDashboardRoute` | `true`                                          | Serve `/api/debrief/dashboard` / 提供投资组合只读路由                         |
+| `dashboardCacheMs`     | `20000`                                         | Dashboard payload cache TTL (0 disables) / 页面 payload 缓存时长              |
+| `dashboardRefresh`     | `background`                                    | `background\|inline\|never` quote refresh on read / 读时行情刷新策略          |
+| `pycachePrefix`        | `<dataDir>/pycache`                             | `PYTHONPYCACHEPREFIX` for kernel calls / 内核字节码缓存目录（空串关闭）       |
 
 **安装即用**：npm 包内置内核 wheel（纯 Python）与离线依赖轮子（`kernel/wheels/`，
 约 2.6MB）。机器上有 **uv 或 Python ≥3.11** 时，首次使用（managed /
