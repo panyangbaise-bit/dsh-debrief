@@ -74,6 +74,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - 美股备用源只覆盖 NASDAQ/NYSE/AMEX/Arca（Nasdaq Trader 目录不含 OTC/粉单），
   粉单标的仍需实时 suggest 才能搜到；本机的 `SPCX` 在主目录里，不受影响。
 
+### Fixed
+
+- **盘后分析的记忆候选永远为空** — `cmd_analysis_prepare` 用裸代码（`NVDA`）
+  去精确匹配带市场前缀的记忆（`US:NVDA`），集合比对永远落空，四个盘后报告
+  全部「记忆候选 0」。现在忽略市场前缀匹配，候选同时覆盖长期摘要 + 未压缩的
+  decision/trade 短期证据，并携带可引用的 `evidenceDocIds`；`ops-*`/`run:` 噪声
+  不入候选，无标的的市场回退到本市场记忆，纪律类主题（discipline/strategy/
+  risk/rule）无标的地全局兜底。
+- **盘后新闻不再四个市场吃同一锅** — 单一 wallstreetcn 流偏美股/宏观，A股盘后
+  曾拿到 5/10 条英伟达治理消息。`cmd_analysis_prepare` 现按市场关键词给新闻打
+  标并只保留目标市场 + 中性条目（`_scope_news`）。
+- **长期记忆不再被任务台账污染** — `run` 源类型（prices/reminders/news 台账）
+  从压缩候选里排除；此前 127 条长期记忆里 92 条是这类 `ops-*` 执行日志。
+- **周/月复盘拿得到「本周」数据** — `debrief_transactions`、`debrief_jobs`
+  增加 `since`/`until`（ISO-8601 窗口），`debrief_report` 增加 `list: true`
+  窗口列表（此前只能读「最新一份」）。
+- **美股盘后时点修正** — 从 Beijing 18:00（= 美东 05:00，美股未开盘，快照恒为
+  持平）改到 **Beijing 次日 05:30**（美股收盘后），当日涨跌终于可量化。
+- **新闻任务标题与节奏对齐** — 标题改「每4小时新闻摘要」，与 INTERVAL=4 一致。
+- 四个盘后 prompt 增加「先陈述数据边界」硬约束（报价时点/交易时段、记忆是否
+  命中、新闻是否跨市场；持平快照不得当作当日涨跌）。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

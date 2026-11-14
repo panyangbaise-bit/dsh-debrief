@@ -92,4 +92,26 @@ describe.skipIf(process.platform === 'win32')('tool argv assembly', () => {
     await byName('debrief_holding_add').execute({ market: 'us', symbol: 'QQQ', quantity: 1, cost: 100 }, ctx())
     expect(loggedArgv()).toEqual([['holdings', 'add', '--json']])
   })
+
+  it('passes since/until through to transactions', async () => {
+    rmSync(logPath, { force: true })
+    await byName('debrief_transactions').execute({ since: '2026-11-09T00:00:00', until: '2026-11-14T00:00:00' }, ctx())
+    expect(loggedArgv()).toEqual([
+      ['transactions', '--since', '2026-11-09T00:00:00', '--until', '2026-11-14T00:00:00', '--json'],
+    ])
+  })
+
+  it('passes since/until through to the job list', async () => {
+    rmSync(logPath, { force: true })
+    await byName('debrief_jobs').execute({ since: '2026-11-09T00:00:00', until: '2026-11-14T00:00:00' }, ctx())
+    expect(loggedArgv()).toEqual([
+      ['job', 'list', '--since', '2026-11-09T00:00:00', '--until', '2026-11-14T00:00:00', '--json'],
+    ])
+  })
+
+  it('routes report list to the list subcommand', async () => {
+    rmSync(logPath, { force: true })
+    await byName('debrief_report').execute({ list: true, market: 'cn' }, ctx())
+    expect(loggedArgv()).toEqual([['report', 'list', '--market', 'cn', '--json']])
+  })
 })

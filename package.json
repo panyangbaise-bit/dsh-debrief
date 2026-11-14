@@ -1,6 +1,6 @@
 {
   "name": "dsh-debrief",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "After-action portfolio review (debrief) for DeepSeek Harness: holdings, transactions, watchlist, instrument search, reports, investment memory, scheduled analysis, an editable dashboard page, and approval-gated portfolio write tools. The debrief kernel is a model-free data CLI; all model work runs in the DSH agent.",
   "license": "MIT",
   "type": "module",

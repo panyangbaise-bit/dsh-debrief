@@ -22,7 +22,7 @@ describe('schedule presets', () => {
       '盘后分析 · A股',
       '盘后分析 · 港股',
       '盘后分析 · 加密',
-      '每小时新闻摘要',
+      '每4小时新闻摘要',
       '周复盘',
       '月度复盘',
       '每日记忆压缩',
@@ -50,7 +50,7 @@ describe('schedule presets', () => {
     expect(rrule('盘后分析 · A股')).toContain('FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR')
     expect(rrule('盘后分析 · 港股')).toContain('FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR')
     expect(rrule('盘后分析 · 加密')).toContain('FREQ=DAILY')
-    expect(rrule('每小时新闻摘要')).toContain('FREQ=HOURLY')
+    expect(rrule('每4小时新闻摘要')).toContain('FREQ=HOURLY;INTERVAL=4')
     expect(rrule('周复盘')).toContain('FREQ=WEEKLY;BYDAY=SA')
     expect(rrule('月度复盘')).toContain('FREQ=MONTHLY;BYMONTHDAY=1')
     expect(rrule('每日记忆压缩')).toContain('FREQ=DAILY')

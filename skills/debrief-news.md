@@ -1,6 +1,6 @@
 name: debrief-news
-description: 每小时新闻摘要技能：读取内核采集的新闻原文流，压缩成要点式摘要并在会话内播报。Hourly news digest: read the kernel-collected raw news feed, compress it into a bullet digest, and announce it in the session.
-whenToUse: 触发条件：DSH Schedule 每小时整点新闻任务交付，或用户要求「扫一下最新消息」。When the hourly news schedule task is delivered, or the user asks for a quick news sweep.
+description: 每4小时新闻摘要技能：读取内核采集的新闻原文流，压缩成要点式摘要并在会话内播报。Hourly news digest: read the kernel-collected raw news feed, compress it into a bullet digest, and announce it in the session.
+whenToUse: 触发条件：DSH Schedule 每4小时新闻任务交付，或用户要求「扫一下最新消息」。When the hourly news schedule task is delivered, or the user asks for a quick news sweep.
 
 # debrief-news · 每小时新闻摘要
 
@@ -8,7 +8,7 @@ whenToUse: 触发条件：DSH Schedule 每小时整点新闻任务交付，或�
 
 ## 触发条件 / When to use
 
-- 定时任务每小时交付（整点后 5 分钟，Asia/Shanghai）。
+- 定时任务每4小时交付（Asia/Shanghai）。
 - 用户主动要求新闻扫描。
 
 ## 步骤 / Steps

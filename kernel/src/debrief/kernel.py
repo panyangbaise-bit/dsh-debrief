@@ -221,7 +221,12 @@ def build_holdings_payload(
 
 
 def build_transactions_payload(
-    session: Session, ticker: Optional[str], limit: int, offset: int
+    session: Session,
+    ticker: Optional[str],
+    limit: int,
+    offset: int,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
 ) -> dict:
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
@@ -232,6 +237,10 @@ def build_transactions_payload(
     )
     if ticker:
         query = query.filter(Holding.ticker == ticker.upper())
+    if since is not None:
+        query = query.filter(Transaction.date >= since)
+    if until is not None:
+        query = query.filter(Transaction.date < until)
     total = query.count()
     rows = query.limit(limit).offset(offset).all()
     items = []

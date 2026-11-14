@@ -13,7 +13,7 @@ whenToUse: 触发条件：DSH Schedule 每日记忆压缩任务交付（02:30 As
 
 ## 步骤 / Steps
 
-1. **取候选**：调用 `debrief_memory`，参数 `compactCandidates: true`（内核映射 `memory compact-candidates --json`）。候选 = 超出短期窗口（默认 30 天）且未压缩的 `memory_documents`，每条带 docId/topic/instruments/sourceType/content。
+1. **取候选**：调用 `debrief_memory`，参数 `compactCandidates: true`（内核映射 `memory compact-candidates --json`）。候选 = 超出短期窗口（默认 30 天）且未压缩的 `memory_documents`，每条带 docId/topic/instruments/sourceType/content。内核已排除 `run` 源类型的任务执行日志（prices/reminders/news 台账），这些不是投资记忆。
 2. **分组**：按 `topic` 分组（source_type + instrument 或语义聚类）；每批 ≤30 条；批内读每条原文与 docId。
 3. **生成摘要**：每个 topic 一组，模板固定（见输出格式）。摘要必须引用原始 docId（`[[cite:doc:<id>]]`），不得改写原意；时间范围取组内最早/最晚。
 4. **幂等写回**：对每组调用 `debrief_memory_compact_write`：
@@ -34,6 +34,7 @@ whenToUse: 触发条件：DSH Schedule 每日记忆压缩任务交付（02:30 As
 - **IRON RULE 3**：每批 ≤30 条；超了就继续分组，不得合并不同主题。
 - **IRON RULE 4**：不得删除、丢弃候选原文；写回失败要报错误码并保留原状态（内核幂等状态机兜底，失败不静默）。
 - **IRON RULE 5**：摘要不含任何候选之外的新事实；置信度必须如实标注。
+- **IRON RULE 6**：`run` 源类型的任务执行日志、写操作审计副本不是投资记忆，不得压缩进长期记忆；发现这类候选应跳过并计入统计说明。
 
 ## 输出格式 / Output format
 

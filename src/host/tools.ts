@@ -239,11 +239,13 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
     }),
     tool(config, {
       name: 'debrief_transactions',
-      description: 'List executed trades, newest first, with pagination.',
+      description: 'List executed trades, newest first, with pagination and an optional ISO-8601 date window.',
       parameters: {
         ticker: sProp('Optional symbol filter, e.g. AAPL.'),
         limit: iProp('Page size. Default 20, max 100.'),
         offset: iProp('Zero-based row offset. Default 0.'),
+        since: sProp('Optional ISO-8601 start (inclusive), e.g. 2026-11-09T00:00:00.'),
+        until: sProp('Optional ISO-8601 end (exclusive).'),
       },
       required: [],
       command: ['transactions'],
@@ -251,6 +253,8 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         ...(a.ticker ? ['--ticker', String(a.ticker)] : []),
         ...(a.limit ? ['--limit', String(a.limit)] : []),
         ...(a.offset ? ['--offset', String(a.offset)] : []),
+        ...(a.since ? ['--since', String(a.since)] : []),
+        ...(a.until ? ['--until', String(a.until)] : []),
       ],
     }),
     tool(config, {
@@ -276,14 +280,30 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
     }),
     tool(config, {
       name: 'debrief_report',
-      description: 'Read an analysis report from the report center: summary, metrics, and chart payload references.',
+      description:
+        'Read an analysis report from the report center: summary, metrics, and chart payload references. By id, the latest of a market, or a list window (list: true) for weekly/monthly reviews.',
       parameters: {
-        id: sProp('Report id; takes precedence over market.'),
+        id: sProp('Report id; takes precedence over market and list.'),
         market: sProp('One of: us, cn, hk, crypto. Latest report of that market when id is omitted.'),
+        list: bProp('List reports in a window (newest first) instead of the single latest.'),
+        since: sProp('Optional ISO-8601 start (inclusive), for list.'),
+        until: sProp('Optional ISO-8601 end (exclusive), for list.'),
+        limit: iProp('Page size for list. Default 50, max 100.'),
       },
       required: [],
       command: ['report'],
-      argsOf: (a) => (a.id ? ['--id', String(a.id)] : ['latest', ...(a.market ? ['--market', String(a.market)] : [])]),
+      argsOf: (a) =>
+        a.id
+          ? ['--id', String(a.id)]
+          : a.list
+            ? [
+                'list',
+                ...(a.market ? ['--market', String(a.market)] : []),
+                ...(a.since ? ['--since', String(a.since)] : []),
+                ...(a.until ? ['--until', String(a.until)] : []),
+                ...(a.limit ? ['--limit', String(a.limit)] : []),
+              ]
+            : ['latest', ...(a.market ? ['--market', String(a.market)] : [])],
     }),
     tool(config, {
       name: 'debrief_memory',
@@ -314,11 +334,20 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
     tool(config, {
       name: 'debrief_jobs',
       description:
-        'List recent scheduled-task runs from the job ledger: kind, time, status, duration, and error code when failed.',
-      parameters: {},
+        'List recent scheduled-task runs from the job ledger: kind, time, status, duration, and error code when failed. Pass since/until to scope to a week or month.',
+      parameters: {
+        limit: iProp('Page size. Default 50, max 100.'),
+        since: sProp('Optional ISO-8601 start (inclusive).'),
+        until: sProp('Optional ISO-8601 end (exclusive).'),
+      },
       required: [],
       command: ['job'],
-      argsOf: () => ['list'],
+      argsOf: (a) => [
+        'list',
+        ...(a.limit ? ['--limit', String(a.limit)] : []),
+        ...(a.since ? ['--since', String(a.since)] : []),
+        ...(a.until ? ['--until', String(a.until)] : []),
+      ],
     }),
     tool(config, {
       name: 'debrief_dashboard',

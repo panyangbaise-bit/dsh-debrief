@@ -101,9 +101,14 @@ def cmd_holdings(session: Session, status: Optional[str], refresh: Optional[bool
 
 
 def cmd_transactions(
-    session: Session, ticker: Optional[str], limit: int, offset: int
+    session: Session,
+    ticker: Optional[str],
+    limit: int,
+    offset: int,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
 ) -> dict:
-    return build_transactions_payload(session, ticker, limit, offset)
+    return build_transactions_payload(session, ticker, limit, offset, since=since, until=until)
 
 
 def cmd_watchlist(session: Session, ticker: Optional[str], refresh: Optional[bool] = None) -> dict:
@@ -272,6 +277,41 @@ def cmd_report_by_id(session: Session, report_id: str) -> dict:
     if report is None:
         raise KernelError("DEBRIEF_NOT_FOUND", f"analysis report '{report_id}' not found")
     return _report_dict(session, report)
+
+
+def cmd_report_list(
+    session: Session,
+    market: Optional[str],
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+    limit: int = 50,
+) -> dict:
+    """Reports in a window (newest first) — lets weekly/monthly reviews page the
+    whole week instead of only the single latest report."""
+    limit = max(1, min(limit, 100))
+    query = session.query(AnalysisReport).order_by(
+        desc(AnalysisReport.generated_at), desc(AnalysisReport.id)
+    )
+    if market:
+        query = query.filter(AnalysisReport.market == normalize_market_db(market))
+    if since is not None:
+        query = query.filter(AnalysisReport.generated_at >= since)
+    if until is not None:
+        query = query.filter(AnalysisReport.generated_at < until)
+    reports = query.limit(limit).all()
+    return {
+        "items": [
+            {
+                "id": report.id,
+                "market": market_to_output(report.market),
+                "title": report.title,
+                "generatedAt": _fmt_time(report.generated_at),
+                "summary": report.summary,
+            }
+            for report in reports
+        ],
+        "count": len(reports),
+    }
 
 
 def cmd_report_create(session: Session, payload: dict) -> dict:
@@ -509,8 +549,14 @@ def _candidate_topics(doc: MemoryDocument) -> str:
 
 def cmd_memory_compact_candidates(session: Session) -> dict:
     cutoff = _now() - timedelta(days=MEMORY_SHORT_TERM_DAYS)
+    # Operational `run` ledger captures (prices/reminders/news jobs) are not
+    # investment memory: never offer them as compaction candidates, or they
+    # flood long-term memory with "通用定时任务执行日志" topics.
     unarchived = session.scalars(
-        select(MemoryDocument).where(MemoryDocument.archived_into.is_(None))
+        select(MemoryDocument).where(
+            MemoryDocument.archived_into.is_(None),
+            MemoryDocument.source_type != "run",
+        )
     ).all()
     expired = [doc for doc in unarchived if (doc.occurred_at or _now()) < cutoff]
     overflow = len(unarchived) - MEMORY_SHORT_TERM_MAX
@@ -799,6 +845,139 @@ def cmd_memory_add(session: Session, payload: dict) -> dict:
 
 # ── analysis prepare ───────────────────────────────────────────────────────
 
+# Keyword hints to scope the single WallStreetCN feed per market. Purely a
+# relevance heuristic; untagged items still pass through as "general".
+NEWS_MARKET_KEYWORDS = {
+    "US": ("美股", "纳斯达克", "纳指", "标普", "道指", "道琼斯", "美联储", "华尔街", "美元", "美债", "英伟达", "苹果", "微软", "特斯拉", "亚马逊", "谷歌", "meta", "台积电", "openai", "anthropic", "sec", "降息", "加息", "非农", "通胀"),
+    "CN": ("a股", "上证", "深证", "创业板", "科创板", "北证", "央行", "人民币", "社融", "贷款", "券商", "北向", "沪深", "中证", "宁德时代", "比亚迪", "茅台", "lpr", "mlf", "降准"),
+    "HK": ("港股", "恒生", "恒指", "港交所", "南向", "港股通", "腾讯", "阿里", "美团", "小米", "快手", "京东"),
+    "CRYPTO": ("加密", "比特币", "以太坊", "区块链", "币安", "coinbase", "稳定币", "山寨币", "狗狗币", "defi", "nft", "挖矿"),
+}
+
+
+def _news_market(headline: str) -> Optional[str]:
+    """Best-effort market tag for a headline; None when it is market-neutral."""
+    text = (headline or "").lower()
+    best, best_score = None, 0
+    for market, words in NEWS_MARKET_KEYWORDS.items():
+        score = sum(1 for word in words if word in text)
+        if score > best_score:
+            best, best_score = market, score
+    return best if best_score >= 1 else None
+
+
+def _scope_news(session: Session, market_db: str, limit: int = 12) -> list[dict]:
+    """Recent news scoped to one market (unrecognised/neutral items included).
+
+    The feed is a single WallStreetCN stream skewing US/macro; without this the
+    A股/港股/加密盘后 all read the same US items.
+    """
+    from db.repository import get_recent_news
+
+    scoped = []
+    for article in get_recent_news(session, limit=60):
+        tag = _news_market(article.headline or "")
+        if tag is None or tag == market_db:
+            scoped.append(
+                {
+                    "title": article.headline,
+                    "at": _fmt_time(article.published_at),
+                    "source": article.source,
+                    "market": tag or "general",
+                }
+            )
+        if len(scoped) >= limit:
+            break
+    return scoped
+
+
+def _strip_market(symbol: str) -> str:
+    """Comparable instrument key: 'US:NVDA' / '09992.HK' / 'NVDA' → 'NVDA' / '09992'."""
+    value = (symbol or "").strip()
+    if ":" in value:
+        value = value.split(":", 1)[1]
+    if "." in value:
+        value = value.split(".", 1)[0]
+    return value.upper()
+
+
+def _memory_candidates(session: Session, symbols, market_db: str, limit: int = 6) -> list[dict]:
+    """Historical context for the after-market analysis.
+
+    Matches by instrument (market prefix ignored); a market with no holdings/
+    watchlist falls back to memories tagged for that market. Operational `run`
+    logs and `ops-*` compaction noise never count, and candidates carry the
+    citable evidence doc ids so the report can reference [[cite:doc:<id>]].
+    """
+    keys = {_strip_market(symbol) for symbol in symbols if symbol}
+    candidates: list[dict] = []
+
+    def matches(instruments) -> bool:
+        values = [str(i) for i in (instruments or [])]
+        if keys:
+            return bool(keys & {_strip_market(i) for i in values})
+        return any(str(i).startswith(market_db + ":") for i in values)
+
+    def candidate(memory: LongTermMemory) -> dict:
+        refs = memory.evidence_refs or []
+        doc_ids = [
+            int(ref.get("docId") if isinstance(ref, dict) else ref)
+            for ref in refs
+            if str(ref.get("docId") if isinstance(ref, dict) else ref).isdigit()
+        ]
+        return {
+            "topic": memory.topic,
+            "summary": (memory.summary or "")[:300],
+            "instruments": list(memory.instruments or []),
+            "confidence": memory.confidence or "medium",
+            "evidenceDocIds": doc_ids[:8],
+        }
+
+    for memory in session.scalars(
+        select(LongTermMemory).order_by(desc(LongTermMemory.compressed_at))
+    ).all():
+        topic = memory.topic or ""
+        if topic.startswith(("ops-", "run:")):
+            continue
+        if matches(memory.instruments):
+            candidates.append(candidate(memory))
+            if len(candidates) >= limit:
+                return candidates
+
+    # Discipline/strategy topics bind regardless of instrument.
+    if len(candidates) < limit:
+        for memory in session.scalars(
+            select(LongTermMemory).order_by(desc(LongTermMemory.compressed_at))
+        ).all():
+            topic = memory.topic or ""
+            if topic.startswith(("ops-", "run:")) or (memory.instruments or []):
+                continue
+            if any(key in topic.lower() for key in ("discipline", "strategy", "risk", "rule")):
+                candidates.append(candidate(memory))
+                if len(candidates) >= limit:
+                    return candidates
+
+    # Freshest decisions/trades that compaction has not summarised yet.
+    for doc in session.scalars(
+        select(MemoryDocument)
+        .where(MemoryDocument.source_type.in_(["decision", "trade", "transaction"]))
+        .order_by(desc(MemoryDocument.occurred_at), desc(MemoryDocument.id))
+        .limit(300)
+    ).all():
+        if matches(doc.instruments):
+            candidates.append(
+                {
+                    "topic": f"{doc.source_type}:{','.join(doc.instruments or ['general'])}",
+                    "summary": (doc.body or "")[:300],
+                    "instruments": list(doc.instruments or []),
+                    "confidence": "high",
+                    "evidenceDocIds": [doc.id],
+                }
+            )
+            if len(candidates) >= limit:
+                break
+    return candidates
+
 
 def cmd_analysis_prepare(
     session: Session, market: str, refresh: Optional[bool] = None
@@ -879,20 +1058,8 @@ def cmd_analysis_prepare(
             }
         )
 
-    news = [
-        {"title": article.headline, "at": _fmt_time(article.published_at), "source": article.source}
-        for article in get_recent_news(session, limit=10)
-    ]
-
-    symbols = set(seen)
-    candidates = []
-    for memory in session.scalars(
-        select(LongTermMemory).order_by(desc(LongTermMemory.compressed_at)).limit(20)
-    ).all():
-        if any(str(symbol).upper() in {str(i).upper() for i in (memory.instruments or [])} for symbol in symbols) or not symbols:
-            candidates.append({"topic": memory.topic, "summary": memory.summary[:300]})
-        if len(candidates) >= 6:
-            break
+    news = _scope_news(session, market_db, limit=12)
+    candidates = _memory_candidates(session, set(seen), market_db)
 
     label = MARKET_LABELS.get(market_to_output(market_db), market_db)
     guidance = (
@@ -927,9 +1094,19 @@ def _job_dict(run: JobRun) -> dict:
     return item
 
 
-def cmd_job_list(session: Session, limit: int) -> dict:
+def cmd_job_list(
+    session: Session,
+    limit: int,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+) -> dict:
     limit = max(1, min(limit, 100))
-    rows = session.query(JobRun).order_by(desc(JobRun.started_at), desc(JobRun.id)).limit(limit).all()
+    query = session.query(JobRun).order_by(desc(JobRun.started_at), desc(JobRun.id))
+    if since is not None:
+        query = query.filter(JobRun.started_at >= since)
+    if until is not None:
+        query = query.filter(JobRun.started_at < until)
+    rows = query.limit(limit).all()
     return {"items": [_job_dict(run) for run in rows]}
 
 

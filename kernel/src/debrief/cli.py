@@ -42,6 +42,25 @@ def _int_arg(value: Optional[str], default: int, minimum: int = 0) -> int:
     return max(minimum, parsed)
 
 
+def _date_arg(value: Optional[str]):
+    """Parse an ISO-8601 date/datetime (naive UTC) for --since / --until."""
+    if value is None:
+        return None
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        parsed = _dt.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise UsageError(f"--since/--until expects ISO-8601, got '{value}'") from None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(_tz.utc).replace(tzinfo=None)
+    return parsed
+
+
 def _range_arg(value: Optional[str]) -> int:
     if value is None:
         return 90
@@ -93,6 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ticker", default=None)
     p.add_argument("--limit", default=None)
     p.add_argument("--offset", default=None)
+    p.add_argument("--since", default=None, help="ISO-8601 start (inclusive)")
+    p.add_argument("--until", default=None, help="ISO-8601 end (exclusive)")
     add_json(p)
 
     p = sub.add_parser("watchlist", help="read the watchlist or write (v2)")
@@ -120,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     pl = rep.add_parser("latest")
     pl.add_argument("--market", default=None)
     add_json(pl)
+    prl = rep.add_parser("list", help="list reports in a window (newest first)")
+    prl.add_argument("--market", default=None)
+    prl.add_argument("--since", default=None)
+    prl.add_argument("--until", default=None)
+    prl.add_argument("--limit", default=None)
+    add_json(prl)
     pi = rep.add_parser("create", help="create a report (payload on stdin)")
     add_json(pi)
     p.add_argument("--id", default=None, help="report id (alternative to 'latest')")
@@ -148,6 +175,8 @@ def build_parser() -> argparse.ArgumentParser:
     jb = p.add_subparsers(dest="job_command", required=True)
     jl = jb.add_parser("list")
     jl.add_argument("--limit", default=None)
+    jl.add_argument("--since", default=None, help="ISO-8601 start (inclusive)")
+    jl.add_argument("--until", default=None, help="ISO-8601 end (exclusive)")
     add_json(jl)
     js = jb.add_parser("start")
     js.add_argument("--kind", required=True)
@@ -285,7 +314,12 @@ def dispatch(args: argparse.Namespace) -> dict:
             return c.cmd_holdings(session, args.status, refresh=_refresh_flag(args))
         if command == "transactions":
             return c.cmd_transactions(
-                session, args.ticker, _int_arg(args.limit, 20), _int_arg(args.offset, 0)
+                session,
+                args.ticker,
+                _int_arg(args.limit, 20),
+                _int_arg(args.offset, 0),
+                since=_date_arg(getattr(args, "since", None)),
+                until=_date_arg(getattr(args, "until", None)),
             )
         if command == "watchlist":
             return c.cmd_watchlist(session, args.ticker, refresh=_refresh_flag(args))
@@ -296,6 +330,14 @@ def dispatch(args: argparse.Namespace) -> dict:
         if command == "report":
             if args.report_command == "latest":
                 return c.cmd_report_latest(session, args.market)
+            if args.report_command == "list":
+                return c.cmd_report_list(
+                    session,
+                    args.market,
+                    since=_date_arg(getattr(args, "since", None)),
+                    until=_date_arg(getattr(args, "until", None)),
+                    limit=_int_arg(args.limit, 50),
+                )
             if args.report_command is None and args.id:
                 return c.cmd_report_by_id(session, args.id)
             raise UsageError(f"unknown report subcommand: {args.report_command}")
@@ -320,7 +362,12 @@ def dispatch(args: argparse.Namespace) -> dict:
             )
         if command == "job":
             if args.job_command == "list":
-                return c.cmd_job_list(session, _int_arg(args.limit, 50))
+                return c.cmd_job_list(
+                    session,
+                    _int_arg(args.limit, 50),
+                    since=_date_arg(getattr(args, "since", None)),
+                    until=_date_arg(getattr(args, "until", None)),
+                )
             if args.job_command == "start":
                 return c.cmd_job_start(session, args.kind)
             if args.job_command == "status":

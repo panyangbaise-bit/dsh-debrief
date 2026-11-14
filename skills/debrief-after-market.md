@@ -1,6 +1,6 @@
 name: debrief-after-market
 description: 盘后分析技能：为单一市场（美股/A股/港股/加密）打包行情、新闻与记忆候选，生成结构化盘后结论并写回内核报告中心。After-market analysis for one market (us/cn/hk/crypto): prepare quotes, news, and memory candidates, synthesize a structured conclusion, and write it back to the kernel report center.
-whenToUse: 触发条件：DSH Schedule 盘后任务交付（美股 18:00 / A股 15:30 / 港股 16:45 / 加密 08:00，Asia/Shanghai），或用户说「做一下 XX 盘后分析」「复盘今天」。When a scheduled after-market task is delivered, or the user asks for a market's after-market review.
+whenToUse: 触发条件：DSH Schedule 盘后任务交付（美股 次日 05:30 / A股 15:30 / 港股 16:45 / 加密 08:00，Asia/Shanghai），或用户说「做一下 XX 盘后分析」「复盘今天」。When a scheduled after-market task is delivered, or the user asks for a market's after-market review.
 
 # debrief-after-market · 盘后分析
 
@@ -35,7 +35,10 @@ whenToUse: 触发条件：DSH Schedule 盘后任务交付（美股 18:00 / A股 
 
 ## 输出格式 / Output format
 
+先写一行**数据边界**：报价时点与是否处于交易时段、记忆候选是否命中（未命中要写明）、新闻是否跨市场。
+
 ```text
+数据边界：……
 一句话总结：……
 关键变化：1) …… 2) ……
 组合影响：……
