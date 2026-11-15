@@ -123,6 +123,10 @@ const zh = {
     'page.currency': '显示币种',
     'page.tint': '涨跌配色',
     'page.displayOptions': '显示设置',
+    'page.memory': '长期记忆',
+    'memory.high': '高置信',
+    'memory.medium': '中置信',
+    'memory.low': '低置信',
     'tint.greenUp': '绿涨红跌',
     'tint.redUp': '红涨绿跌',
     'page.fxRate': '1 CNY ≈ {rate} {ccy} · 汇率更新 {time}',
@@ -310,6 +314,10 @@ const en = {
     'page.currency': 'Display currency',
     'page.tint': 'Gain/loss colours',
     'page.displayOptions': 'Display options',
+    'page.memory': 'Long-term memory',
+    'memory.high': 'High',
+    'memory.medium': 'Medium',
+    'memory.low': 'Low',
     'tint.greenUp': 'Green up',
     'tint.redUp': 'Red up',
     'page.fxRate': '1 CNY ≈ {rate} {ccy} · FX updated {time}',
@@ -591,6 +599,12 @@ function renderModel(kind, data) {
                 fx: opt(obj({ base: opt(s()), asOf: opt(s()), rates: opt(obj({})), source: opt(s()) })),
                 pricesAsOf: opt(s()),
                 pricesRefreshed: opt({ type: 'boolean' }),
+                memories: opt(arr(obj({
+                    topic: opt(s()),
+                    summary: opt(s()),
+                    confidence: opt(s()),
+                    version: opt(int()),
+                }))),
                 priceErrors: opt(arr(s())),
             }), data);
             return result.ok
@@ -797,6 +811,11 @@ function clientFactory(requireFn) {
 .dbr-menu-sec{font-size:10.5px;color:var(--dsw-alias-label-secondary);margin:2px 2px 6px}
 .dbr-menu-sec:not(:first-child){margin-top:10px}
 .dbr-menu-row{display:flex;gap:6px;flex-wrap:wrap}
+.dbr-mem-list{display:flex;flex-direction:column}
+.dbr-mem-row{display:flex;align-items:baseline;gap:8px;padding:5px 0;border-top:.5px solid var(--dsw-alias-border-l1);font-size:12px}
+.dbr-mem-row:first-child{border-top:0}
+.dbr-mem-topic{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);flex:0 0 auto}
+.dbr-mem-summary{color:var(--dsw-alias-label-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 `;
     // ---- helpers --------------------------------------------------------------
     function fmt(n, digits = 2) {
@@ -1757,6 +1776,7 @@ function clientFactory(requireFn) {
         const composition = toArray(record?.composition);
         const holdings = toArray(record?.holdings);
         const watchlist = toArray(record?.watchlist);
+        const memories = toArray(record?.memories);
         const fx = (record?.fx ?? null);
         const rates = fx?.rates ?? {};
         const rawFactor = ccy === 'CNY' ? 1 : Number(rates[ccy]);
@@ -1888,7 +1908,9 @@ function clientFactory(requireFn) {
                             className: 'dbr-btn sm danger',
                             onClick: () => setModal({ entity: 'watchlist', mode: 'remove', row: w }),
                         }, t('edit.remove')))))))))
-                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), modal ? h(EditModal, { t, state: modal, onClose: () => setModal(null), onSaved }) : null, toast ? h('div', { className: 'dbr-toast ' + toast.tone, role: 'status' }, toast.text) : null));
+                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), memories.length > 0
+                        ? h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('page.memory')), h('div', { className: 'dbr-mem-list' }, memories.map((m) => h('div', { className: 'dbr-mem-row', key: String(m.topic ?? '') + String(m.version ?? '') }, h('span', { className: 'dbr-b ' + (m.confidence === 'high' ? 'ok' : m.confidence === 'low' ? 'warn' : 'neutral') }, t(m.confidence === 'high' ? 'memory.high' : m.confidence === 'low' ? 'memory.low' : 'memory.medium')), h('span', { className: 'dbr-mem-topic' }, String(m.topic ?? '')), h('span', { className: 'dbr-mem-summary' }, String(m.summary ?? ''))))))
+                        : null, modal ? h(EditModal, { t, state: modal, onClose: () => setModal(null), onSaved }) : null, toast ? h('div', { className: 'dbr-toast ' + toast.tone, role: 'status' }, toast.text) : null));
     }
     function PanelGlyph(props) {
         return h('svg', {

@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 MEMORY_SHORT_TERM_DAYS = int(os.environ.get("MEMORY_SHORT_TERM_DAYS", "30"))
 MEMORY_SHORT_TERM_MAX = int(os.environ.get("MEMORY_SHORT_TERM_MAX", "500"))
+MEMORY_RETIRE_DAYS = int(os.environ.get("MEMORY_RETIRE_DAYS", "180"))
 MEMORY_COMPACT_BATCH = min(int(os.environ.get("MEMORY_COMPACT_BATCH", "30")), 30)
 MEMORY_ARCHIVE_DELETE = os.environ.get("MEMORY_ARCHIVE_DELETE", "false").lower() in (
     "1",
@@ -411,11 +412,15 @@ def cmd_report_create(session: Session, payload: dict) -> dict:
 def _long_term_matches(session: Session, query: str) -> list[LongTermMemory]:
     words = [w for w in tokenize(query) if len(w) > 1]
     memories = session.scalars(
-        select(LongTermMemory).order_by(desc(LongTermMemory.version), desc(LongTermMemory.id))
+        select(LongTermMemory)
+        .where(LongTermMemory.retired_at.is_(None))
+        .order_by(desc(LongTermMemory.version), desc(LongTermMemory.id))
     ).all()
     scored = []
     haystack_query = query.lower()
     for memory in memories:
+        if (memory.topic or "").startswith("ops-"):
+            continue
         haystack = (
             f"{memory.topic} {memory.summary} {' '.join(memory.instruments or [])}".lower()
         )
@@ -473,7 +478,7 @@ def _short_hits(session: Session, query: str, limit: int = 5) -> list[dict]:
                     SELECT c.id FROM memory_fts
                     JOIN memory_chunks c ON c.id = memory_fts.rowid
                     JOIN memory_documents d ON d.id = c.document_id
-                    WHERE memory_fts MATCH :q AND d.archived_into IS NULL
+                    WHERE memory_fts MATCH :q AND d.archived_into IS NULL AND d.source_type != 'run' 
                     ORDER BY bm25(memory_fts), c.id DESC LIMIT 80
                     """
                 ),
@@ -597,7 +602,27 @@ def cmd_memory_compact_candidates(session: Session) -> dict:
                     ],
                 }
             )
-    return {"batches": batches, "pendingCount": len(candidates)}
+    # Forgetting: operational-noise topics and stale low-confidence summaries
+    # are offered for retirement (archived, never deleted — stays auditable).
+    retire_cutoff = _now() - timedelta(days=MEMORY_RETIRE_DAYS)
+    retire_candidates = []
+    for memory in session.scalars(
+        select(LongTermMemory)
+        .where(LongTermMemory.retired_at.is_(None))
+        .order_by(desc(LongTermMemory.compressed_at))
+    ).all():
+        stale_low = memory.confidence == "low" and (memory.compressed_at or _now()) < retire_cutoff
+        if (memory.topic or "").startswith("ops-") or stale_low:
+            retire_candidates.append(
+                {
+                    "topic": memory.topic,
+                    "id": memory.id,
+                    "confidence": memory.confidence,
+                    "compressedAt": _fmt_window(memory.compressed_at),
+                    "daysSince": max(0, (_now() - (memory.compressed_at or _now())).days),
+                }
+            )
+    return {"batches": batches, "pendingCount": len(candidates), "retireCandidates": retire_candidates}
 
 
 def _iso_parse(value: str) -> Optional[datetime]:
@@ -624,6 +649,24 @@ def cmd_memory_compact_write(session: Session, payload: dict) -> dict:
     from db.repository import record_user_action
 
     topic = require_string(payload, "topic") or ""
+    if payload.get("retire"):
+        memory = session.scalars(
+            select(LongTermMemory).where(
+                LongTermMemory.topic == topic, LongTermMemory.retired_at.is_(None)
+            )
+        ).first()
+        if memory is None:
+            raise KernelError("DEBRIEF_NOT_FOUND", f"active long-term memory '{topic}' not found")
+        memory.retired_at = _now()
+        record_user_action(
+            session,
+            "memory.retire",
+            target_type="long_term_memory",
+            target_id=str(memory.id),
+            notes=topic,
+        )
+        session.commit()
+        return {"id": memory.id, "version": memory.version, "retired": True}
     summary = require_string(payload, "summary") or ""
     instruments = payload.get("instruments") or []
     if not isinstance(instruments, list):
@@ -934,7 +977,9 @@ def _memory_candidates(session: Session, symbols, market_db: str, limit: int = 6
         }
 
     for memory in session.scalars(
-        select(LongTermMemory).order_by(desc(LongTermMemory.compressed_at))
+        select(LongTermMemory)
+        .where(LongTermMemory.retired_at.is_(None))
+        .order_by(desc(LongTermMemory.compressed_at))
     ).all():
         topic = memory.topic or ""
         if topic.startswith(("ops-", "run:")):
@@ -947,7 +992,9 @@ def _memory_candidates(session: Session, symbols, market_db: str, limit: int = 6
     # Discipline/strategy topics bind regardless of instrument.
     if len(candidates) < limit:
         for memory in session.scalars(
-            select(LongTermMemory).order_by(desc(LongTermMemory.compressed_at))
+            select(LongTermMemory)
+            .where(LongTermMemory.retired_at.is_(None))
+            .order_by(desc(LongTermMemory.compressed_at))
         ).all():
             topic = memory.topic or ""
             if topic.startswith(("ops-", "run:")) or (memory.instruments or []):

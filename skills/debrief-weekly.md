@@ -17,7 +17,7 @@ whenToUse: 触发条件：DSH Schedule 周六 09:00（Asia/Shanghai）交付，�
    - `debrief_holdings`（现状）；`debrief_transactions`（本周成交，注意时间过滤）；
    - `debrief_report`（各市场最新报告：us/cn/hk/crypto 各读一次）；
    - `debrief_jobs`（本周任务台账，确认定时任务健康度与失败项）。
-2. **记忆对齐**：用 `debrief_memory` 检索本周纪律关键词（如「止盈」「止损」「仓位上限」），核对本周操作是否与历史纪律一致。
+2. **记忆对齐**：用 `debrief_memory` 检索本周纪律关键词（如「止盈」「止损」「仓位上限」），核对本周操作是否与历史纪律一致。若本周有用户投资问答（conversation 类）尚未沉淀，先补 `debrief_memory_add`（sourceType=conversation，逐字引用）。
 3. **输出周复盘**：结构化输出（格式见下），并在会话内完整呈现。
 4. **决策沉淀**：对本周**实际做出的决策**（买/卖/调仓/放弃操作/纪律更新），每条调用一次 `debrief_memory_add`：
    - `sourceType` = `decision`（交易类用 `trade`）；

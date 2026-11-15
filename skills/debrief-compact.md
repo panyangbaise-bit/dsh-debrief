@@ -26,6 +26,8 @@ whenToUse: 触发条件：DSH Schedule 每日记忆压缩任务交付（02:30 As
    - `caveats` = 已知局限与未知。
 5. **决策沉淀**：候选里属于**决策**的条目（决策/交易类），同步 `debrief_memory_add` 沉淀为可检索快照（内容带原文与 docId 引用）。
 6. **汇报**：输出压缩统计（组数、覆盖 docId 列表、写回的 id/version）。
+7. **遗忘（retire）**：输入包自带 `retireCandidates`。`ops-*` 主题是任务日志噪声，逐条 `debrief_memory_compact_write`（`retire: true`）；低置信度且超过 180 天未更新的主题，只有被新判断取代时才 retire，否则保留。播报里单列「退役 n 条」。
+8. **问答晋升**：`conversation` / `note` 类候选与决策类同等对待，按 topic 压缩成长期记忆（用户投资问答是最重要的记忆来源之一，不得丢弃）。
 
 ## IRON 约束 / Iron rules
 
@@ -35,6 +37,7 @@ whenToUse: 触发条件：DSH Schedule 每日记忆压缩任务交付（02:30 As
 - **IRON RULE 4**：不得删除、丢弃候选原文；写回失败要报错误码并保留原状态（内核幂等状态机兜底，失败不静默）。
 - **IRON RULE 5**：摘要不含任何候选之外的新事实；置信度必须如实标注。
 - **IRON RULE 6**：`run` 源类型的任务执行日志、写操作审计副本不是投资记忆，不得压缩进长期记忆；发现这类候选应跳过并计入统计说明。
+- **IRON RULE 7**：退役（retire）与压缩一样幂等；同一 topic 只 retire 一次，不重复调用。
 
 ## 输出格式 / Output format
 

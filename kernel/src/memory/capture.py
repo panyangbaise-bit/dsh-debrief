@@ -8,14 +8,17 @@ from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session
 
 _INSTALLED = False
+# Memory captures only what the model cannot recompute from a business table:
+# user trades, watchlist/position edits, discipline rules and feedback, plus
+# written analysis reports. Job-run ledgers (`run`) and news articles (`news`)
+# already live in their own tables and are operational noise in memory — every
+# 30-minute poll would otherwise mint a memory document.
 SOURCE_TYPES = {
     "holdings": "holding",
     "transactions": "transaction",
     "user_actions": "feedback",
-    "job_runs": "run",
     "watchlist_items": "watchlist",
     "trading_discipline": "discipline",
-    "news_articles": "news",
     "financial_reports": "financial",
     "analysis_reports": "report",
 }

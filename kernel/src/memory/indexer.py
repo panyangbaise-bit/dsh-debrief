@@ -6,7 +6,7 @@ import re
 import threading
 from datetime import timedelta, timezone
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import not_, or_, select, text
 from sqlalchemy.orm import Session
 
 from config import config
@@ -52,6 +52,13 @@ def chunks(body, size=1600):
         buffer = (buffer + "\n\n" + paragraph).strip()
     if buffer:
         yield buffer
+
+
+# Operational mirrors (job-run ledgers, news) never enter the memory index;
+# embeddings are reserved for decision/trade/report content — the only sources
+# whose semantic retrieval justifies ~20 KB per chunk.
+SKIP_INDEX_SOURCE_TYPES = ("run", "news")
+EMBEDDABLE_SOURCE_TYPES = ("decision", "trade", "report")
 
 
 def backfill_batch(engine, limit=None):
@@ -100,7 +107,10 @@ def index_lexical_batch(engine, limit=None):
         db.execute(text("BEGIN IMMEDIATE"))
         docs = db.scalars(
             select(MemoryDocument)
-            .where(MemoryDocument.indexed_at.is_(None))
+            .where(
+                MemoryDocument.indexed_at.is_(None),
+                MemoryDocument.source_type.notin_(SKIP_INDEX_SOURCE_TYPES),
+            )
             .order_by(MemoryDocument.id)
             .limit(limit)
         ).all()
@@ -163,6 +173,7 @@ def index_vector_batch(engine, limit=None):
                 select(MemoryDocument.id)
                 .where(
                     MemoryDocument.indexed_at.is_not(None),
+                    MemoryDocument.source_type.in_(EMBEDDABLE_SOURCE_TYPES),
                     or_(
                         MemoryDocument.vector_profile.is_(None),
                         MemoryDocument.vector_profile != version,

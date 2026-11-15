@@ -123,6 +123,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **币种与配色收进下拉** — 头部不再平铺两组 chip，改为一个「CNY · 红涨绿跌」
   下拉菜单（币种 + 涨跌配色两段），支持点击外部/Esc 关闭，选择仍持久化。
 
+### Changed
+
+- **记忆只捕获「值得记的」**（内核 0.6.0）— capture 白名单去掉 `run`/`news`：
+  任务台账、新闻只留在各自的业务表，不再生成记忆文档（此前每天 ~160 条 run
+  文档 + 全部新闻镜像）。交易、持仓/自选变更、纪律、反馈、报告照常入记忆。
+  词法索引跳过 run/news，向量嵌入只给 decision/trade/report 三类。
+- **长期记忆支持遗忘**（migration v16，`retired_at`）— `memory compact-write`
+  接受 `retire: true` 归档一个 topic（保留审计、不再参与检索）；
+  `compact-candidates` 额外返回 `retireCandidates`（`ops-*` 主题 + 超
+  `MEMORY_RETIRE_DAYS`（默认 180 天）未更新的低置信度主题）；检索与盘后
+  记忆候选统一排除已退役和 `ops-*` 主题。
+- **盘后输入包附带记忆索引** — dashboard payload 新增 `memories`（12 条
+  topic + 一句话摘要 + 置信度），投资组合页底部新增「长期记忆」面板；
+  详情仍经 `debrief_memory` 检索。
+- **问答沉淀引导** — `debrief_memory_add` 说明改为「任何会话都可用来沉淀
+  投资问答/决策」；每日压缩技能新增退役步骤与 conversation 晋升步骤（用户
+  问答与决策同等对待，不得丢弃），周复盘技能核对本周问答是否已沉淀。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

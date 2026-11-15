@@ -325,6 +325,7 @@ class LongTermMemory(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     compressed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     embedding_profile: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    retired_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self):
         return f"<LongTermMemory(id={self.id}, topic='{self.topic}', v{self.version})>"

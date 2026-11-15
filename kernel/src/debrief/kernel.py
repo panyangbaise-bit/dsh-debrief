@@ -5,11 +5,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, not_, select
 from sqlalchemy.orm import Session
 
 from adapters.fx import get_rates
-from db.models import Holding, PriceCache, Transaction, WatchlistItem
+from db.models import Holding, LongTermMemory, PriceCache, Transaction, WatchlistItem
 from debrief.context import display_now, market_to_output
 from debrief.errors import KernelError
 from domain.markets import currency_for_market
@@ -114,6 +114,41 @@ def _two_closes(session: Session, ticker: str, market: str) -> tuple[Optional[fl
 def _open_holdings(session: Session, status: Optional[str]) -> list[Holding]:
     # The CLI contract renders the current portfolio: open positions only.
     return session.query(Holding).filter(Holding.status == "open").all()
+
+
+def _memory_index(session: Session, limit: int = 12) -> list[dict]:
+    """One-line memory index for the portfolio page (topic + summary).
+
+    Follows the retrieval rules: retired and `ops-*` topics never surface, and
+    the freshest topics come first; the UI reads details through `debrief_memory`.
+    """
+    rows = session.scalars(
+        select(LongTermMemory)
+        .where(
+            LongTermMemory.retired_at.is_(None),
+            not_(LongTermMemory.topic.startswith("ops-")),
+            not_(LongTermMemory.topic.startswith("run:")),
+        )
+        .order_by(desc(LongTermMemory.compressed_at))
+        .limit(limit)
+    ).all()
+    items = []
+    for memory in rows:
+        topic = memory.topic or ""
+        one_line = " ".join((memory.summary or "").splitlines()).strip()
+        if len(one_line) > 180:
+            one_line = one_line[:177].rstrip() + "…"
+        items.append(
+            {
+                "topic": topic,
+                "summary": one_line,
+                "confidence": memory.confidence or "medium",
+                "version": memory.version or 1,
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
 
 
 def _prices_as_of(session: Session) -> Optional[str]:
@@ -428,5 +463,6 @@ def build_dashboard_payload(
         "watchlist": watchlist_payload["items"],
         "fx": fx,
         "pricesAsOf": _prices_as_of(session),
+        "memories": _memory_index(session),
         **refresh_meta,
     }

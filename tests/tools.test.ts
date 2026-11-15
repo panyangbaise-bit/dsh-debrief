@@ -64,7 +64,10 @@ describe('tool registry', () => {
   it('requires the documented fields for debrief_memory_compact_write', () => {
     const tool = tools.find((candidate) => candidate.name === 'debrief_memory_compact_write')
     const parameters = tool?.parameters as { required?: string[] }
-    expect(parameters.required).toEqual(['topic', 'instruments', 'summary', 'evidenceRefs', 'timeRange'])
+    // Only topic is mandatory now: the kernel validates the full write shape,
+    // and `retire: true` needs nothing else.
+    expect(parameters.required).toEqual(['topic'])
+    expect(parameters.properties.retire).toBeTruthy()
   })
 
   it('requires the documented fields for debrief_memory_add', () => {

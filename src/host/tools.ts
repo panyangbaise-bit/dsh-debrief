@@ -116,6 +116,7 @@ export function reportCreatePayload(args: Record<string, unknown>): string {
 }
 
 export function compactWritePayload(args: Record<string, unknown>): string {
+  if (args.retire === true) return JSON.stringify({ topic: args.topic, retire: true })
   return JSON.stringify({
     topic: args.topic,
     instruments: args.instruments,
@@ -153,14 +154,15 @@ export const writePayloadShapes = {
   compactWrite: obj(
     {
       topic: s(),
-      instruments: arr(s()),
-      summary: s(),
-      evidenceRefs: arr(evidenceRefShape),
-      timeRange: obj({ from: s(), to: s() }, ['from', 'to']),
+      retire: opt({ type: 'boolean' }),
+      instruments: opt(arr(s())),
+      summary: opt(s()),
+      evidenceRefs: opt(arr(evidenceRefShape)),
+      timeRange: opt(obj({ from: s(), to: s() }, ['from', 'to'])),
       confidence: opt(s()),
       caveats: opt(s()),
     },
-    ['topic', 'instruments', 'summary', 'evidenceRefs', 'timeRange'],
+    ['topic'],
   ),
   memoryAdd: obj(
     {
@@ -457,15 +459,16 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         },
         confidence: sProp('high, medium, or low.'),
         caveats: sProp('Known limitations and unknowns.'),
+        retire: bProp('Retire (archive) this topic instead of writing a summary — forgetting, e.g. for ops-* noise or stale low-confidence memories. Only `topic` is required when retiring.'),
       },
-      required: ['topic', 'instruments', 'summary', 'evidenceRefs', 'timeRange'],
+      required: ['topic'],
       command: ['memory', 'compact-write'],
       writeKind: 'compactWrite',
     }),
     tool(config, {
       name: 'debrief_memory_add',
       description:
-        'Append one decision or observation snapshot to short-term memory evidence (decision sedimentation from the session log or kernel events). Runs `memory add --json` with the payload on stdin.' +
+        'Append one decision or observation snapshot to short-term memory evidence. Use it in ANY session to sediment durable investment facts: user trade decisions, risk/discipline statements, and investment Q&A conclusions (sourceType=conversation). The daily compaction promotes durable entries into long-term memory. Runs `memory add --json` with the payload on stdin.' +
         WRITE_NOTE,
       parameters: {
         sourceType: sProp('Snapshot kind: decision, trade, report, note, or conversation.'),

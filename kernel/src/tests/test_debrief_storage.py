@@ -237,3 +237,92 @@ def test_catalog_upsert_and_rank(db):
         # Re-upsert updates in place (unique market+symbol).
         _upsert_rows(session, [dict(rows[0], name="苹果公司")])
         assert session.scalars(select(InstrumentCatalog)).all()[0].name == "苹果公司"
+
+
+def test_compact_write_retire_archives_a_topic(db):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with Session(db) as session:
+        session.add(
+            LongTermMemory(
+                topic="ops-general-run-x", instruments=[], summary="任务执行日志",
+                evidence_refs=[], time_range="{}", confidence="medium", compressed_at=now,
+            )
+        )
+        session.commit()
+        result = commands.cmd_memory_compact_write(session, {"topic": "ops-general-run-x", "retire": True})
+        assert result["retired"] is True
+        session.expire_all()
+        assert session.scalars(
+            select(LongTermMemory).where(LongTermMemory.topic == "ops-general-run-x")
+        ).one().retired_at is not None
+        # retiring twice is a not-found, not a silent success
+        with pytest.raises(KernelError) as excinfo:
+            commands.cmd_memory_compact_write(session, {"topic": "ops-general-run-x", "retire": True})
+        assert excinfo.value.code == "DEBRIEF_NOT_FOUND"
+
+
+def test_compact_candidates_offer_ops_and_stale_low_for_retirement(db):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    old = now - timedelta(days=400)
+    with Session(db) as session:
+        for topic, conf, at in (
+            ("ops-general-run-1", "high", now),
+            ("stale-low", "low", old),
+            ("fresh-high", "high", now),
+        ):
+            session.add(
+                LongTermMemory(
+                    topic=topic, instruments=[], summary="s", evidence_refs=[],
+                    time_range="{}", confidence=conf, compressed_at=at,
+                )
+            )
+        session.commit()
+        result = commands.cmd_memory_compact_candidates(session)
+    topics = {item["topic"] for item in result["retireCandidates"]}
+    assert "ops-general-run-1" in topics
+    assert "stale-low" in topics
+    assert "fresh-high" not in topics
+
+
+def test_capture_whitelist_skips_operational_rows(db):
+    """Job-run ledger and news rows live in their own tables, not in memory."""
+    from db.models import JobRun, NewsArticle
+    from db.repository import create_holding
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with Session(db) as session:
+        session.add(
+            JobRun(job_id="prices", job_name="价格采集", status="succeeded", started_at=now, ended_at=now)
+        )
+        session.add(
+            NewsArticle(ticker=None, headline="某条新闻", source="wallstreetcn", url=None,
+                        published_at=now, summary=None, relevance_score=None)
+        )
+        session.commit()
+        assert session.scalars(
+            select(MemoryDocument).where(MemoryDocument.source_type.in_(["run", "news"]))
+        ).all() == []
+    with Session(db) as session:
+        create_holding(session, "600519", "CN", shares=100, cost_basis=1400.0, name="贵州茅台")
+        session.commit()
+        captured = {doc.source_type for doc in session.scalars(select(MemoryDocument)).all()}
+        assert "holding" in captured and "transaction" in captured
+
+
+def test_lexical_index_skips_operational_sources(db):
+    from db.models import MemoryChunk
+    from memory import indexer
+
+    with Session(db) as session:
+        add_doc(session, "run 任务执行日志", source_type="run")
+        add_doc(session, "交易 买入 卖出", source_type="transaction", instruments=["US:NVDA"])
+        session.commit()
+    indexer.index_lexical_batch(db, limit=50)
+    with Session(db) as session:
+        chunked = session.scalars(
+            select(MemoryDocument.id)
+            .join(MemoryChunk, MemoryChunk.document_id == MemoryDocument.id)
+            .distinct()
+        ).all()
+        docs = {doc.id: doc.source_type for doc in session.scalars(select(MemoryDocument)).all()}
+    assert {docs[ident] for ident in chunked} == {"transaction"}

@@ -442,6 +442,12 @@ def _unique_index_columns(conn: Connection, table: str) -> list:
     return found
 
 
+def _migrate_v16_ltm_retired_at(conn: Connection) -> None:
+    """long_term_memories.retired_at: forgetting keeps the row, hides it from retrieval."""
+    if "long_term_memories" in _table_names(conn) and "retired_at" not in _columns(conn, "long_term_memories"):
+        conn.execute(text("ALTER TABLE long_term_memories ADD COLUMN retired_at DATETIME"))
+
+
 def _migrate_v15_catalog_asset_class(conn: Connection) -> None:
     """instrument_catalog: unique (market, symbol) → (market, symbol, asset_class).
 
@@ -569,6 +575,7 @@ MIGRATIONS = [
     ("v13_debrief_write_columns", _migrate_v13_write_columns),
     ("v14_price_cache_fetched_at", _migrate_v14_price_cache_fetched_at),
     ("v15_catalog_asset_class", _migrate_v15_catalog_asset_class),
+    ("v16_ltm_retired_at", _migrate_v16_ltm_retired_at),
 ]
 
 

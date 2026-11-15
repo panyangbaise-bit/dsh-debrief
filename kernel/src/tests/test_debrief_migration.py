@@ -237,3 +237,32 @@ def test_v15_catalog_key_includes_asset_class(tmp_path):
         ).fetchall()
     assert [tuple(row) for row in rows] == [("fund", "华夏成长混合"), ("stock", "平安银行")]
     engine.dispose()
+
+
+def test_v16_adds_ltm_retired_at(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'ltm-v15.db'}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE long_term_memories (
+                    id INTEGER PRIMARY KEY,
+                    topic VARCHAR(200) NOT NULL,
+                    instruments JSON, summary TEXT NOT NULL,
+                    evidence_refs JSON, time_range TEXT NOT NULL,
+                    confidence VARCHAR(10), caveats TEXT,
+                    version INTEGER, compressed_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text("INSERT INTO long_term_memories (topic, summary, time_range, compressed_at) "
+                 "VALUES ('t', 's', '{}', '2026-11-14 00:00:00')")
+        )
+    migrate(engine)
+    migrate(engine)  # idempotent
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(long_term_memories)"))}
+    assert "retired_at" in cols
+    engine.dispose()
