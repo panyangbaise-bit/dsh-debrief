@@ -172,6 +172,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_json(mw)
     ma = mem.add_parser("add", help="append an evidence snapshot (payload on stdin)")
     add_json(ma)
+    ml = mem.add_parser("list", help="list long-term memories (active by default)")
+    ml.add_argument("--all", action="store_true", dest="memory_all", help="include retired topics")
+    ml.add_argument("--limit", default=None)
+    add_json(ml)
+    mu = mem.add_parser("update", help="edit/restore a long-term memory (payload on stdin)")
+    add_json(mu)
+    mr = mem.add_parser("remove", help="delete a long-term memory (payload on stdin)")
+    add_json(mr)
 
     p = sub.add_parser("analysis", help="prepare an after-market input package")
     an = p.add_subparsers(dest="analysis_command", required=True)
@@ -238,7 +246,7 @@ def dispatch(args: argparse.Namespace) -> dict:
     command = args.command
 
     # Write commands read their JSON payload from stdin and need no session.
-    if command == "memory" and args.memory_command in ("compact-write", "add"):
+    if command == "memory" and args.memory_command in ("compact-write", "add", "update", "remove"):
         from debrief import commands as c
 
         payload = read_stdin_json()
@@ -246,7 +254,11 @@ def dispatch(args: argparse.Namespace) -> dict:
         try:
             if args.memory_command == "compact-write":
                 return c.cmd_memory_compact_write(session, payload)
-            return c.cmd_memory_add(session, payload)
+            if args.memory_command == "add":
+                return c.cmd_memory_add(session, payload)
+            if args.memory_command == "update":
+                return c.cmd_memory_update(session, payload)
+            return c.cmd_memory_remove(session, payload)
         finally:
             session.close()
     if command == "report" and args.report_command == "create":
@@ -353,6 +365,12 @@ def dispatch(args: argparse.Namespace) -> dict:
         if command == "memory":
             if args.memory_command == "search":
                 return c.cmd_memory_search(session, args.query)
+            if args.memory_command == "list":
+                return c.cmd_memory_list(
+                    session,
+                    include_retired=bool(getattr(args, "memory_all", False)),
+                    limit=_int_arg(args.limit, 100),
+                )
             if args.memory_command == "compact-candidates":
                 return c.cmd_memory_compact_candidates(session)
             raise UsageError(f"unknown memory subcommand: {args.memory_command}")

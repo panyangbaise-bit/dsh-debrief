@@ -141,6 +141,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   投资问答/决策」；每日压缩技能新增退役步骤与 conversation 晋升步骤（用户
   问答与决策同等对待，不得丢弃），周复盘技能核对本周问答是否已沉淀。
 
+### Added
+
+- **独立的「记忆」页面**（侧边栏新入口，与投资组合分开）— 列出全部长期记忆
+  （含 `ops-*` 便于人工清理），支持页内**编辑摘要、改置信度、退役、恢复、删除**
+  （删除需二次点击确认）。内核新增 `memory list|update|remove` 命令与
+  `GET/POST /api/debrief/memory` 路由（owner cookie），写操作全部进
+  `user_actions` 审计（memory.update/restore/remove/retire）。
+
 ### Performance
 
 - **Portfolio page: 4.2 s → 0.6 s** (3 concurrent: 8.6 s → 1.35 s). Three

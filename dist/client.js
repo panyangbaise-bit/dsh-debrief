@@ -124,6 +124,18 @@ const zh = {
     'page.tint': '涨跌配色',
     'page.displayOptions': '显示设置',
     'page.memory': '长期记忆',
+    'page.memoryNav': '记忆',
+    'memory.count': '{count} 条',
+    'memory.none': '暂无长期记忆',
+    'memory.edit': '编辑',
+    'memory.save': '保存',
+    'memory.cancel': '取消',
+    'memory.retire': '退役',
+    'memory.restore': '恢复',
+    'memory.delete': '删除',
+    'memory.deleteConfirm': '再点一次确认删除',
+    'memory.updated': '已保存',
+    'memory.retired': '已退役',
     'memory.high': '高置信',
     'memory.medium': '中置信',
     'memory.low': '低置信',
@@ -315,6 +327,18 @@ const en = {
     'page.tint': 'Gain/loss colours',
     'page.displayOptions': 'Display options',
     'page.memory': 'Long-term memory',
+    'page.memoryNav': 'Memory',
+    'memory.count': '{count} topics',
+    'memory.none': 'No long-term memories yet',
+    'memory.edit': 'Edit',
+    'memory.save': 'Save',
+    'memory.cancel': 'Cancel',
+    'memory.retire': 'Retire',
+    'memory.restore': 'Restore',
+    'memory.delete': 'Delete',
+    'memory.deleteConfirm': 'Click again to confirm',
+    'memory.updated': 'Saved',
+    'memory.retired': 'Retired',
     'memory.high': 'High',
     'memory.medium': 'Medium',
     'memory.low': 'Low',
@@ -666,6 +690,8 @@ function editSelector(row) {
 const NS = 'dsh-debrief';
 const PANEL_ID = 'debrief-dashboard';
 const DASHBOARD_API = '/api/debrief/dashboard';
+const MEMORY_API = '/api/debrief/memory';
+const MEMORY_PANEL_ID = 'debrief-memory';
 /** Client-side payload cache so re-visiting a range paints immediately. */
 const RANGE_CACHE_MS = 30_000;
 const rangeCache = new Map();
@@ -811,11 +837,13 @@ function clientFactory(requireFn) {
 .dbr-menu-sec{font-size:10.5px;color:var(--dsw-alias-label-secondary);margin:2px 2px 6px}
 .dbr-menu-sec:not(:first-child){margin-top:10px}
 .dbr-menu-row{display:flex;gap:6px;flex-wrap:wrap}
-.dbr-mem-list{display:flex;flex-direction:column}
-.dbr-mem-row{display:flex;align-items:baseline;gap:8px;padding:5px 0;border-top:.5px solid var(--dsw-alias-border-l1);font-size:12px}
-.dbr-mem-row:first-child{border-top:0}
+.dbr-mem-cards{display:flex;flex-direction:column;gap:10px}
+.dbr-mem-card.retired{opacity:.62}
+.dbr-mem-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dbr-mem-topic{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);flex:0 0 auto}
-.dbr-mem-summary{color:var(--dsw-alias-label-primary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dbr-mem-actions{margin-left:auto;display:flex;gap:6px}
+.dbr-mem-summary{font-size:12.5px;color:var(--dsw-alias-label-primary);margin-top:6px;white-space:pre-wrap}
+.dbr-mem-edit{width:100%;box-sizing:border-box;margin-top:6px;background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dbr-radius-sm);color:var(--dsw-alias-label-primary);font-size:12.5px;padding:8px;resize:vertical;font-family:inherit;line-height:1.5}
 `;
     // ---- helpers --------------------------------------------------------------
     function fmt(n, digits = 2) {
@@ -1776,7 +1804,6 @@ function clientFactory(requireFn) {
         const composition = toArray(record?.composition);
         const holdings = toArray(record?.holdings);
         const watchlist = toArray(record?.watchlist);
-        const memories = toArray(record?.memories);
         const fx = (record?.fx ?? null);
         const rates = fx?.rates ?? {};
         const rawFactor = ccy === 'CNY' ? 1 : Number(rates[ccy]);
@@ -1908,9 +1935,139 @@ function clientFactory(requireFn) {
                             className: 'dbr-btn sm danger',
                             onClick: () => setModal({ entity: 'watchlist', mode: 'remove', row: w }),
                         }, t('edit.remove')))))))))
-                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), memories.length > 0
-                        ? h('div', { className: 'dbr-panel wide' }, h('div', { className: 'dbr-panel-title' }, t('page.memory')), h('div', { className: 'dbr-mem-list' }, memories.map((m) => h('div', { className: 'dbr-mem-row', key: String(m.topic ?? '') + String(m.version ?? '') }, h('span', { className: 'dbr-b ' + (m.confidence === 'high' ? 'ok' : m.confidence === 'low' ? 'warn' : 'neutral') }, t(m.confidence === 'high' ? 'memory.high' : m.confidence === 'low' ? 'memory.low' : 'memory.medium')), h('span', { className: 'dbr-mem-topic' }, String(m.topic ?? '')), h('span', { className: 'dbr-mem-summary' }, String(m.summary ?? ''))))))
-                        : null, modal ? h(EditModal, { t, state: modal, onClose: () => setModal(null), onSaved }) : null, toast ? h('div', { className: 'dbr-toast ' + toast.tone, role: 'status' }, toast.text) : null));
+                        : h('div', { className: 'dbr-hint' }, t('page.empty'))), modal ? h(EditModal, { t, state: modal, onClose: () => setModal(null), onSaved }) : null, toast ? h('div', { className: 'dbr-toast ' + toast.tone, role: 'status' }, toast.text) : null));
+    }
+    function MemoryPage(props) {
+        const t = pickT(props.t);
+        const [items, setItems] = React.useState([]);
+        const [state, setState] = React.useState('loading');
+        const [error, setError] = React.useState('');
+        const [attempt, setAttempt] = React.useState(0);
+        const [busy, setBusy] = React.useState(null);
+        const [editing, setEditing] = React.useState(null);
+        const [draft, setDraft] = React.useState('');
+        const [armed, setArmed] = React.useState(null);
+        const [toast, setToast] = React.useState('');
+        React.useEffect(() => {
+            let cancelled = false;
+            setState('loading');
+            fetch(`${MEMORY_API}?retired=1`)
+                .then((response) => response.json())
+                .then((body) => {
+                if (cancelled)
+                    return;
+                if (body.ok === true) {
+                    setItems(body.data?.items ?? []);
+                    setState('ready');
+                }
+                else {
+                    setError(String((body.error ?? {}).message ?? ''));
+                    setState('error');
+                }
+            })
+                .catch((err) => {
+                if (cancelled)
+                    return;
+                setError(String(err));
+                setState('error');
+            });
+            return () => {
+                cancelled = true;
+            };
+        }, [attempt]);
+        React.useEffect(() => {
+            if (toast === '')
+                return;
+            const timer = setTimeout(() => setToast(''), 2600);
+            return () => clearTimeout(timer);
+        }, [toast]);
+        const post = (action, payload) => {
+            setBusy(String(payload.topic ?? ''));
+            fetch(MEMORY_API, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ action, ...payload }),
+            })
+                .then((response) => response.json())
+                .then((body) => {
+                if (body.ok !== true) {
+                    setError(String((body.error ?? {}).message ?? ''));
+                    return;
+                }
+                setEditing(null);
+                setArmed(null);
+                setToast(t('memory.updated'));
+                setAttempt((previous) => previous + 1);
+            })
+                .catch((err) => setError(String(err)))
+                .finally(() => setBusy(null));
+        };
+        const confidenceKey = (value) => value === 'high' ? 'memory.high' : value === 'low' ? 'memory.low' : 'memory.medium';
+        const confidenceClass = (value) => (value === 'high' ? 'ok' : value === 'low' ? 'warn' : 'neutral');
+        return h('div', { className: 'dbr-page' }, h('div', { className: 'dbr-page-head' }, h('div', { className: 'dbr-page-title' }, t('page.memoryNav')), h('div', { className: 'dbr-page-meta' }, state === 'ready' ? t('memory.count', { count: items.length }) : null)), state === 'loading'
+            ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-skeleton' }))
+            : state === 'error'
+                ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-page-err' }, error))
+                : items.length === 0
+                    ? h('div', { className: 'dbr-panel' }, h('div', { className: 'dbr-hint' }, t('memory.none')))
+                    : h('div', { className: 'dbr-mem-cards' }, items.map((item) => {
+                        const topic = String(item.topic ?? '');
+                        const retired = item.retiredAt !== null && item.retiredAt !== undefined;
+                        const isEditing = editing === topic;
+                        const isBusy = busy === topic;
+                        return h('div', { className: 'dbr-panel dbr-mem-card' + (retired ? ' retired' : ''), key: topic }, h('div', { className: 'dbr-mem-head' }, h('span', { className: 'dbr-mem-topic' }, topic), h('span', { className: 'dbr-b ' + confidenceClass(item.confidence) }, t(confidenceKey(item.confidence))), retired ? h('span', { className: 'dbr-b neutral' }, t('memory.retired')) : null, h('span', { className: 'dbr-mem-actions' }, isEditing
+                            ? h('span', { className: 'dbr-mem-actions' }, h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm primary',
+                                disabled: isBusy,
+                                onClick: () => post('update', { topic, summary: draft }),
+                            }, t('memory.save')), h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm',
+                                disabled: isBusy,
+                                onClick: () => setEditing(null),
+                            }, t('memory.cancel')))
+                            : h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm',
+                                disabled: isBusy,
+                                onClick: () => {
+                                    setEditing(topic);
+                                    setDraft(String(item.summary ?? ''));
+                                },
+                            }, t('memory.edit')), retired
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm',
+                                disabled: isBusy,
+                                onClick: () => post('restore', { topic }),
+                            }, t('memory.restore'))
+                            : h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm',
+                                disabled: isBusy,
+                                onClick: () => post('retire', { topic }),
+                            }, t('memory.retire')), armed === topic
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm danger',
+                                disabled: isBusy,
+                                onClick: () => post('remove', { topic }),
+                            }, t('memory.deleteConfirm'))
+                            : h('button', {
+                                type: 'button',
+                                className: 'dbr-btn sm danger',
+                                disabled: isBusy,
+                                onClick: () => setArmed(topic),
+                            }, t('memory.delete')))), isEditing
+                            ? h('textarea', {
+                                className: 'dbr-mem-edit',
+                                value: draft,
+                                rows: 4,
+                                onChange: (event) => setDraft(event.target.value),
+                            })
+                            : h('div', { className: 'dbr-mem-summary' }, String(item.summary ?? '')));
+                    })), toast !== '' ? h('div', { className: 'dbr-toast ok' }, toast) : null);
     }
     function PanelGlyph(props) {
         return h('svg', {
@@ -1924,6 +2081,19 @@ function clientFactory(requireFn) {
             strokeLinejoin: 'round',
             'aria-hidden': true,
         }, h('path', { d: 'M2 14h12' }), h('path', { d: 'M4.5 14V9.5M8 14V5.5M11.5 14V8' }));
+    }
+    function MemoryGlyph(props) {
+        return h('svg', {
+            width: props.size ?? 18,
+            height: props.size ?? 18,
+            viewBox: '0 0 16 16',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 1.5,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            'aria-hidden': true,
+        }, h('rect', { x: 2, y: 3, width: 12, height: 10, rx: 1.5 }), h('path', { d: 'M5 3v10M8 3v10M11 3v10' }));
     }
     const VIEWS = {
         debrief_holdings: HoldingsCard,
@@ -1971,10 +2141,18 @@ function clientFactory(requireFn) {
         const disposeNav = ctx.slots.inject('sidebar.panellist', function* () {
             yield ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => at('page.panel') }, PanelGlyph);
         });
+        const disposeMemoryPage = ctx.slots.inject('main', function* () {
+            yield ctx.slots.register({ name: 'main', key: MEMORY_PANEL_ID, locale: NS, inject: () => ({}) }, MemoryPage);
+        });
+        const disposeMemoryNav = ctx.slots.inject('sidebar.panellist', function* () {
+            yield ctx.slots.register({ name: 'sidebar.panellist', id: MEMORY_PANEL_ID, order: 21, locale: NS, label: () => at('page.memoryNav') }, MemoryGlyph);
+        });
         return () => {
             disposeViews();
             disposePage();
             disposeNav();
+            disposeMemoryPage();
+            disposeMemoryNav();
             if (typeof disposeStyle === 'function')
                 disposeStyle();
         };

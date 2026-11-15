@@ -538,6 +538,102 @@ def _short_item(session: Session, doc: MemoryDocument, excerpt: str) -> dict:
     }
 
 
+def cmd_memory_list(session: Session, include_retired: bool = False, limit: int = 100) -> dict:
+    """Management listing for the memory page: everything the model may edit.
+
+    Unlike the retrieval paths, this surfaces `ops-*` topics too — the page is
+    where the user retires or deletes them.
+    """
+    limit = max(1, min(limit, 200))
+    query = session.query(LongTermMemory).order_by(desc(LongTermMemory.compressed_at), desc(LongTermMemory.id))
+    if not include_retired:
+        query = query.filter(LongTermMemory.retired_at.is_(None))
+    rows = query.limit(limit).all()
+    return {
+        "items": [
+            {
+                "id": memory.id,
+                "topic": memory.topic,
+                "instruments": list(memory.instruments or []),
+                "summary": memory.summary,
+                "confidence": memory.confidence or "medium",
+                "version": memory.version or 1,
+                "compressedAt": _fmt_window(memory.compressed_at),
+                "retiredAt": _fmt_window(memory.retired_at) if memory.retired_at else None,
+            }
+            for memory in rows
+        ],
+        "count": len(rows),
+    }
+
+
+def cmd_memory_update(session: Session, payload: dict) -> dict:
+    """Edit a topic in place (summary/confidence/caveats) or restore a retired one.
+
+    Version bumps and `compressed_at` refreshes so re-compaction keeps working.
+    """
+    from db.repository import record_user_action
+
+    topic = require_string(payload, "topic") or ""
+    memory = session.scalars(select(LongTermMemory).where(LongTermMemory.topic == topic)).first()
+    if memory is None:
+        raise KernelError("DEBRIEF_NOT_FOUND", f"long-term memory '{topic}' not found")
+    if payload.get("restore"):
+        if memory.retired_at is None:
+            raise KernelError("DEBRIEF_CONFLICT", f"memory '{topic}' is not retired")
+        memory.retired_at = None
+        memory.compressed_at = _now()
+        record_user_action(
+            session, "memory.restore", target_type="long_term_memory",
+            target_id=str(memory.id), notes=topic,
+        )
+        session.commit()
+        return {"id": memory.id, "version": memory.version, "restored": True}
+    summary = payload.get("summary")
+    confidence = payload.get("confidence")
+    caveats = payload.get("caveats")
+    if summary is None and confidence is None and caveats is None:
+        raise KernelError("DEBRIEF_VALIDATION", "at least one of summary, confidence, caveats is required")
+    if summary is not None:
+        if not isinstance(summary, str) or not summary.strip():
+            raise KernelError("DEBRIEF_VALIDATION", "summary must be a non-empty string")
+        memory.summary = summary.strip()
+    if confidence is not None:
+        if confidence not in ("high", "medium", "low"):
+            raise KernelError("DEBRIEF_VALIDATION", "confidence must be high|medium|low")
+        memory.confidence = confidence
+    if caveats is not None:
+        if not isinstance(caveats, str):
+            raise KernelError("DEBRIEF_VALIDATION", "caveats must be a string")
+        memory.caveats = caveats
+    memory.version = (memory.version or 1) + 1
+    memory.compressed_at = _now()
+    record_user_action(
+        session, "memory.update", target_type="long_term_memory",
+        target_id=str(memory.id), notes=topic,
+    )
+    session.commit()
+    return {"id": memory.id, "version": memory.version}
+
+
+def cmd_memory_remove(session: Session, payload: dict) -> dict:
+    """Hard-delete one topic (explicit user action, audited; evidence docs stay)."""
+    from db.repository import record_user_action
+
+    topic = require_string(payload, "topic") or ""
+    memory = session.scalars(select(LongTermMemory).where(LongTermMemory.topic == topic)).first()
+    if memory is None:
+        raise KernelError("DEBRIEF_NOT_FOUND", f"long-term memory '{topic}' not found")
+    memory_id, version = memory.id, memory.version
+    session.delete(memory)
+    record_user_action(
+        session, "memory.remove", target_type="long_term_memory",
+        target_id=str(memory_id), notes=topic,
+    )
+    session.commit()
+    return {"id": memory_id, "version": version, "removed": True}
+
+
 def cmd_memory_search(session: Session, query: str) -> dict:
     query = query.strip()
     if not query:

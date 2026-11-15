@@ -11,7 +11,7 @@ import { defineTools } from './tools.js'
 import { loadSkills, registerSkills } from './skills.js'
 import { loadSchedulePresets, registerSetupCommand } from './schedule.js'
 import { registerDashboardRoute } from './dashboard.js'
-import { registerEditRoutes } from './routes.js'
+import { registerEditRoutes, registerMemoryRoute } from './routes.js'
 import { gateWriteTools } from './edits.js'
 import type { DebriefContext, ToolDefinition } from './types.js'
 import type { DebriefConfig } from './config.js'
@@ -49,6 +49,8 @@ export function apply(rawCtx: DebriefContext, rawConfig?: Partial<DebriefConfig>
   ctx.effect(() => registerDashboardRoute(ctx, config), 'dsh-debrief: dashboard route')
 
   ctx.effect(() => registerEditRoutes(ctx, config), 'dsh-debrief: edit routes')
+
+  ctx.effect(() => registerMemoryRoute(ctx, config), 'dsh-debrief: memory route')
 
   // v2 approval gate: agent-initiated portfolio writes ask the user through
   // the DSH approval confirmation flow; without approval support the ask

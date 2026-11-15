@@ -326,3 +326,35 @@ def test_lexical_index_skips_operational_sources(db):
         ).all()
         docs = {doc.id: doc.source_type for doc in session.scalars(select(MemoryDocument)).all()}
     assert {docs[ident] for ident in chunked} == {"transaction"}
+
+
+def test_memory_list_update_restore_remove_lifecycle(db):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with Session(db) as session:
+        session.add(
+            LongTermMemory(
+                topic="position-aapl-rationale", instruments=["US:AAPL"], summary="建仓理由",
+                evidence_refs=[], time_range="{}", confidence="high", compressed_at=now,
+            )
+        )
+        session.commit()
+
+        listed = commands.cmd_memory_list(session)
+        assert listed["count"] == 1 and listed["items"][0]["topic"] == "position-aapl-rationale"
+
+        updated = commands.cmd_memory_update(
+            session, {"topic": "position-aapl-rationale", "summary": "更新的理由", "confidence": "medium"}
+        )
+        assert updated["version"] == 2
+
+        commands.cmd_memory_compact_write(session, {"topic": "position-aapl-rationale", "retire": True})
+        session.expire_all()
+        assert commands.cmd_memory_list(session)["count"] == 0
+        assert commands.cmd_memory_list(session, include_retired=True)["count"] == 1
+
+        commands.cmd_memory_update(session, {"topic": "position-aapl-rationale", "restore": True})
+        session.expire_all()
+        assert commands.cmd_memory_list(session)["count"] == 1
+
+        assert commands.cmd_memory_remove(session, {"topic": "position-aapl-rationale"})["removed"] is True
+        assert commands.cmd_memory_list(session)["count"] == 0

@@ -6,13 +6,14 @@
  * Peer) — exactly like the dashboard route. The UI is the second caller of
  * the single Host operation `runEdit`; the agent tools are the first.
  */
-import { runCli } from './cli.js'
+import { runCli, type Envelope } from './cli.js'
 import { runEdit, validateEditPayload, type EditAction, type EditEntity } from './edits.js'
 import type { ConnectionFetchRoute, DebriefContext } from './types.js'
 import type { DebriefConfig } from './config.js'
 
 export const INSTRUMENTS_PATH = '/api/debrief/instruments'
 export const MUTATE_PATH = '/api/debrief/mutate'
+export const MEMORY_PATH = '/api/debrief/memory'
 
 const MARKETS = new Set(['us', 'cn', 'hk', 'crypto'])
 
@@ -25,6 +26,74 @@ function jsonResponse(body: unknown, status: number): Response {
 
 const badRequest = (message: string): Response =>
   jsonResponse({ ok: false, schemaVersion: 1, error: { code: 'DEBRIEF_ARGS', message } }, 400)
+
+const MEMORY_ACTIONS = new Set(['update', 'remove', 'retire', 'restore'])
+
+export interface MemoryRouteDeps {
+  runCli?: (args: readonly string[], options?: { stdin?: string; signal?: AbortSignal }) => Promise<Envelope>
+}
+
+/** Memory management page: list (GET) and edit/retire/restore/delete (POST). */
+export function registerMemoryRoute(
+  ctx: DebriefContext,
+  config: DebriefConfig,
+  deps: MemoryRouteDeps = {},
+): () => void {
+  const run = deps.runCli ?? ((args, options) => runCli(config, args, options))
+  const route: ConnectionFetchRoute = {
+    path: MEMORY_PATH,
+    methods: ['GET', 'POST'],
+    requestBody: 'buffered',
+    async fetch(request) {
+      if (request.method === 'GET') {
+        const url = new URL(request.url)
+        const retired = url.searchParams.get('retired') === '1'
+        const envelope = await run(['memory', 'list', ...(retired ? ['--all'] : []), '--limit', '200'])
+        return jsonResponse(envelope, envelope.ok ? 200 : 502)
+      }
+      let body: Record<string, unknown>
+      try {
+        body = (await request.json()) as Record<string, unknown>
+      } catch {
+        return badRequest('body must be JSON')
+      }
+      const action = typeof body.action === 'string' ? body.action : ''
+      if (!MEMORY_ACTIONS.has(action)) return badRequest('action must be update|remove|retire|restore')
+      const topic = typeof body.topic === 'string' ? body.topic.trim() : ''
+      if (topic === '') return badRequest('topic is required')
+      const args = [
+        'memory',
+        ...(action === 'retire' ? ['compact-write'] : action === 'remove' ? ['remove'] : ['update']),
+      ]
+      const payload: Record<string, unknown> = { topic }
+      if (action === 'retire') payload.retire = true
+      else if (action === 'restore') payload.restore = true
+      else if (action === 'update') {
+        if (typeof body.summary === 'string' && body.summary.trim() !== '') payload.summary = body.summary.trim()
+        if (body.confidence === 'high' || body.confidence === 'medium' || body.confidence === 'low')
+          payload.confidence = body.confidence
+        if (typeof body.caveats === 'string') payload.caveats = body.caveats
+      }
+      const envelope = await run(args, { stdin: JSON.stringify(payload) })
+      const status = envelope.ok
+        ? 200
+        : envelope.error.code === 'DEBRIEF_NOT_FOUND'
+          ? 404
+          : envelope.error.code === 'DEBRIEF_CONFLICT'
+            ? 409
+            : 502
+      return jsonResponse(envelope, status)
+    },
+  }
+  let unregister: () => Promise<void>
+  try {
+    unregister = ctx.connection.fetch.register(route)
+  } catch (error) {
+    console.warn('[dsh-debrief] memory route registration failed:', error instanceof Error ? error.message : error)
+    return () => {}
+  }
+  return () => void unregister()
+}
 
 export function registerEditRoutes(ctx: DebriefContext, config: DebriefConfig): () => void {
   const instruments: ConnectionFetchRoute = {
