@@ -9,6 +9,11 @@ import { runCli, type Envelope } from './cli.js'
 import type { ContentBlock, JsonNode, ToolDefinition, ToolRunContext } from './types.js'
 import { validate, arr, obj, opt, s } from './schema.js'
 import { runEdit, type EditAction, type EditEntity } from './edits.js'
+import {
+  checkProfileWriteArgs,
+  profileWriteShape,
+  validateProfileWritePayload,
+} from './profile.js'
 import type { DebriefConfig } from './config.js'
 
 const OUT_SCHEMA: JsonNode = { description: 'debrief kernel envelope' }
@@ -36,9 +41,11 @@ interface ToolSpec {
   /** CLI argument vector for the command; empty for the passthrough tools. */
   argsOf?: (args: Record<string, unknown>) => readonly string[]
   /** Write kind whose validated payload travels on stdin (whitelisted writes). */
-  writeKind?: 'reportCreate' | 'compactWrite' | 'memoryAdd'
+  writeKind?: 'reportCreate' | 'compactWrite' | 'memoryAdd' | 'profileWrite'
   /** v2 edit operation (holdings/watchlist add|update|remove), approval-gated. */
   edit?: { entity: EditEntity; action: EditAction }
+  /** Non-write commands that still take a JSON payload on stdin (e.g. notify send). */
+  stdinFrom?: (args: Record<string, unknown>) => string | undefined
   /** Extra conditional argument validation (e.g. mutually exclusive inputs). */
   checkArgs?: (args: Record<string, unknown>) => string | undefined
 }
@@ -88,6 +95,10 @@ function tool(config: DebriefConfig, spec: ToolSpec): ToolDefinition {
           }
         }
         return runCli(config, [...spec.command], { signal: exec.signal, stdin: checked.stdin })
+      }
+      if (spec.stdinFrom) {
+        const stdin = spec.stdinFrom(args)
+        return runCli(config, [...spec.command], { signal: exec.signal, stdin })
       }
       if (spec.argsOf) {
         return runCli(config, [...spec.command, ...spec.argsOf(args)], { signal: exec.signal })
@@ -173,6 +184,7 @@ export const writePayloadShapes = {
     },
     ['sourceType', 'content', 'instruments'],
   ),
+  profileWrite: profileWriteShape,
 }
 
 const WRITE_NOTE =
@@ -180,13 +192,18 @@ const WRITE_NOTE =
 
 /** Validate a write payload against its declared shape and return the CLI stdin JSON. */
 export function validateWritePayload(
-  kind: 'reportCreate' | 'compactWrite' | 'memoryAdd',
+  kind: 'reportCreate' | 'compactWrite' | 'memoryAdd' | 'profileWrite',
   args: Record<string, unknown>,
 ): {
   ok: boolean
   stdin?: string
   error?: { code: string; message: string }
 } {
+  if (kind === 'profileWrite') {
+    // Shared with the /api/debrief/profile route (one operation, two callers).
+    const checked = validateProfileWritePayload(args)
+    return checked.ok ? { ok: true, stdin: checked.stdin } : { ok: false, error: checked.error }
+  }
   const result = validate(writePayloadShapes[kind], args)
   if (!result.ok) {
     return { ok: false, error: { code: 'DEBRIEF_ARGS', message: `invalid payload: ${result.path} ${result.reason}` } }
@@ -371,7 +388,7 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
         limit: iProp('Maximum items. Default 20, max 100.'),
         refresh: bProp('When false, skip the live fetch and read the last collected batch only. Default true.'),
         notify: bProp(
-          'When true, newly fetched items are also pushed to Telegram (requires Telegram config). Default false.',
+          'Legacy: when true, newly fetched RAW items are pushed to Telegram (no digest). Prefer composing a digest and pushing it with debrief_telegram action "send". Default false.',
         ),
       },
       required: [],
@@ -380,15 +397,26 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
     }),
     tool(config, {
       name: 'debrief_telegram',
-      description: 'Check or test the Telegram bot notification channel used for debrief reports and news pushes.',
+      description:
+        'Send or inspect the Telegram notification channel used for debrief pushes. ' +
+        '"send" pushes an agent-composed digest/alert message (markdown bold and [text](url) links become Telegram HTML, long messages are split automatically); ' +
+        '"test" sends a fixed test message; "status" reports whether Telegram is configured (token is masked).',
       parameters: {
         action: sProp(
-          '"test" sends a test message to the configured bot; "status" reports whether Telegram is configured (token is masked).',
+          '"send" pushes text to the configured chat; "test" sends a fixed test message; "status" reports configuration state.',
+        ),
+        text: sProp(
+          'Message to push when action is "send" (required for send). Keep it concise; markdown **bold**, bullet lists, and [text](url) links are converted to Telegram HTML.',
         ),
       },
       required: ['action'],
+      checkArgs: (a) =>
+        a.action === 'send' && (typeof a.text !== 'string' || a.text.trim() === '')
+          ? 'action "send" requires a non-empty text'
+          : undefined,
       command: ['notify'],
       argsOf: telegramArgs,
+      stdinFrom: (a) => (a.action === 'send' ? JSON.stringify({ text: String(a.text ?? '') }) : undefined),
     }),
     tool(config, {
       name: 'debrief_report_create',
@@ -572,6 +600,50 @@ export function defineTools(config: DebriefConfig): ToolDefinition[] {
       required: [],
       command: ['watchlist', 'remove'],
       edit: { entity: 'watchlist', action: 'remove' },
+    }),
+    // ---- investment memory profile (whitelisted write; kernel caller-derived updatedBy) ----
+    tool(config, {
+      name: 'debrief_profile',
+      description:
+        'Read the investment memory profile: six digest sections (portfolio, habits, discipline, risk, advice, decisions) with per-section content and updatedBy, the profile version, evidence docIds, the verbatim trading_discipline excerpt, and the pre-assembled evidence package (active long-term topics, holdings/transaction structure, recent decision documents). The evidence package is the ONLY allowed input when regenerating the digest — never search memory freely for generation; free search (debrief_memory) is only for answering questions. Read this before rewriting sections so you have the current version for expectedVersion and know which sections the user hand-edited.',
+      parameters: {},
+      required: [],
+      command: ['profile', 'get'],
+    }),
+    tool(config, {
+      name: 'debrief_profile_write',
+      description:
+        'Write investment memory profile sections back to the kernel. Partial update: only the sections listed in `sections` change; omitted sections keep their current content. The kernel derives updatedBy from the caller, so this tool writes every listed section as agent-authored. Pass `expectedVersion` (the version you just read) for optimistic concurrency; on mismatch the kernel answers DEBRIEF_CONFLICT — re-read and merge. When `protectUserSections` is true, sections whose current updatedBy is "user" are left untouched and reported in `preserved` — always set it for scheduled regeneration, never when the user explicitly asked to change a section.' +
+        WRITE_NOTE,
+      parameters: {
+        sections: {
+          type: 'array',
+          description: 'Sections to write (partial update). Each item: key and the full new content.',
+          items: {
+            type: 'object',
+            properties: {
+              key: sProp('One of: portfolio, habits, discipline, risk, advice, decisions.'),
+              content: sProp('Full new text of this section; empty string clears it.'),
+            },
+            required: ['key', 'content'],
+          },
+        },
+        evidenceRefs: {
+          type: 'array',
+          description: 'Replaces the whole evidence-reference list; each docId must exist in memory documents.',
+          items: {
+            type: 'object',
+            properties: { docId: { type: 'integer', description: 'Memory document id.' } },
+            required: ['docId'],
+          },
+        },
+        expectedVersion: iProp('Optional version from the debrief_profile read; mismatch answers DEBRIEF_CONFLICT.'),
+        protectUserSections: bProp('True = skip sections the user hand-edited (updatedBy "user"); use for scheduled regeneration.'),
+      },
+      required: [],
+      command: ['profile', 'write', '--by', 'agent'],
+      writeKind: 'profileWrite',
+      checkArgs: checkProfileWriteArgs,
     }),
   ]
 }

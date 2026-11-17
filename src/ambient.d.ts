@@ -79,3 +79,16 @@ declare module 'node:os' {
 declare module 'node:url' {
   export function fileURLToPath(url: URL | string): string
 }
+
+/**
+ * Plugin-owned SessionReferenceSource label for profile-page delivery into the
+ * currently open session. The package ships zero runtime dsh dependencies, so
+ * the merge target module is declared ambiently here; at runtime the label is
+ * a plain string key in the sessions-service retain counter map.
+ */
+declare module '@deepseek-ai/dsh-api-session-controller/client' {
+  interface SessionReferenceSourceMap {
+    /** Investment memory profile page: ask/update/regenerate delivery. */
+    debriefProfilePage: unknown
+  }
+}

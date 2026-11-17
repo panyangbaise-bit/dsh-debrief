@@ -182,7 +182,7 @@ echo '{"market":"us","title":"盘后分析","summary":"…","fullText":"…","me
 - 必需：`market/title/summary`；可选 `fullText/metrics[]/chart/jobId`。
 - 落 `analysis_reports` + `analysis_charts`（`chart_id` 关联）；写 `user_actions` 审计（`report.create`）。
 - 带 `jobId`：对应 `job_runs` 置 `succeeded` 并回填 `report_id`（返回 `status:"succeeded"`）；job 不存在 → `DEBRIEF_NOT_FOUND`。
-- 返回新增 `notified`（bool）：`TELEGRAM_REPORT_PUSH=true`（默认）且 Telegram 已配置时，向 chat 推送 `📋 复盘报告 · <market>` 摘要；推送失败/未配置均为 false，不影响落库。
+- 返回新增 `notified`（bool）：`TELEGRAM_REPORT_PUSH=true`（**默认 false**）且 Telegram 已配置时，向 chat 推送 `📋 复盘报告 · <market>` 原始摘要；推送失败/未配置均为 false，不影响落库。默认关闭：定时技能（盘后/周/月复盘）已用 `debrief notify send` 推送精简摘要，内核再推会重复。
 
 ## 6. memory search
 
@@ -357,7 +357,7 @@ debrief migrate --json
 debrief worker [--dry-run] [--json]
 ```
 
-- APScheduler 常驻数据采集（**无任何 LLM 调用**）：`prices`（**`*/30 * * * *` 全天每 30 分钟，Asia/Shanghai**，覆盖美股盘后 21:30–04:00、港股尾盘、A 股与加密全天；可用 `PRICES_CRONTAB` 环境变量或 `data/scheduler_settings.json` 的 `prices_crontab` 键覆盖）、`news`（NEWS_CRONTAB，默认 0 8-22/2；采集后若 `TELEGRAM_NEWS_PUSH=true`（默认）且已配置 Telegram，推送最多 6 条新标题摘要，返回 `{"fetched","saved","notified"}`）、`catalog-sync`（每日 06:10，akshare 列表 + CoinGecko /coins/list）、`reminders`（*/15 提醒比对 + Telegram 通知）、`cleanup`（每日 03:00，`JOB_RUN_RETENTION_DAYS=365` 分批 DELETE + incremental_vacuum）。
+- APScheduler 常驻数据采集（**无任何 LLM 调用**）：`prices`（**`*/30 * * * *` 全天每 30 分钟，Asia/Shanghai**，覆盖美股盘后 21:30–04:00、港股尾盘、A 股与加密全天；可用 `PRICES_CRONTAB` 环境变量或 `data/scheduler_settings.json` 的 `prices_crontab` 键覆盖）、`news`（NEWS_CRONTAB，默认 0 8-22/2；采集后若 `TELEGRAM_NEWS_PUSH=true`（**默认 false**，原始条目会与技能侧摘要重复）且已配置 Telegram，推送最多 6 条新标题摘要，返回 `{"fetched","saved","notified"}`）、`catalog-sync`（每日 06:10，akshare 列表 + CoinGecko /coins/list）、`reminders`（*/15 提醒比对 + Telegram 通知）、`cleanup`（每日 03:00，`JOB_RUN_RETENTION_DAYS=365` 分批 DELETE + incremental_vacuum）。
 - 上游故障不崩溃：每次运行写 `job_runs`（succeeded / failed + `DEBRIEF_UPSTREAM_*` 错误码）。
 - `--dry-run` 打印排程并退出。
 
@@ -416,7 +416,7 @@ debrief notify status --json    # → {"ok":true,"schemaVersion":1,"data":{"conf
 
 - `test`：未配置（缺 `TELEGRAM_BOT_TOKEN` 或 `TELEGRAM_CHAT_ID`）→ `DEBRIEF_TELEGRAM_UNCONFIGURED`；已配置则发送 `✅ debrief 推送测试` + 当前时间并返回 `{"sent":bool}`。
 - `status`：只读配置状态；`tokenMask` = 首 4 位…末 4 位（仅 token 存在时；永不泄露完整 token，单边配置也给出掩码）。
-- 推送总开关：`TELEGRAM_NEWS_PUSH`（worker 新闻摘要推送）与 `TELEGRAM_REPORT_PUSH`（`report create` 复盘推送），默认均 true，`"0"/"false"/"no"` 关闭。
+- 推送总开关：`TELEGRAM_NEWS_PUSH`（worker 新闻摘要推送）与 `TELEGRAM_REPORT_PUSH`（`report create` 复盘推送）**默认均 false**——原始条目/原始报告摘要会与技能侧 digest 重复；设 `"1"/"true"/"yes"` 开启，`"0"/"false"/"no"` 关闭。
 
 ---
 

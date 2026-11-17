@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -239,7 +239,7 @@ def test_catalog_upsert_and_rank(db):
         assert session.scalars(select(InstrumentCatalog)).all()[0].name == "苹果公司"
 
 
-def test_compact_write_retire_archives_a_topic(db):
+def test_compact_write_retire_hard_deletes_a_topic(db):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     with Session(db) as session:
         session.add(
@@ -250,11 +250,12 @@ def test_compact_write_retire_archives_a_topic(db):
         )
         session.commit()
         result = commands.cmd_memory_compact_write(session, {"topic": "ops-general-run-x", "retire": True})
-        assert result["retired"] is True
+        assert result["retired"] is True and result.get("deleted") is True
         session.expire_all()
+        # retire is a hard delete: the row is physically gone, not soft-archived
         assert session.scalars(
             select(LongTermMemory).where(LongTermMemory.topic == "ops-general-run-x")
-        ).one().retired_at is not None
+        ).first() is None
         # retiring twice is a not-found, not a silent success
         with pytest.raises(KernelError) as excinfo:
             commands.cmd_memory_compact_write(session, {"topic": "ops-general-run-x", "retire": True})
@@ -347,14 +348,33 @@ def test_memory_list_update_restore_remove_lifecycle(db):
         )
         assert updated["version"] == 2
 
+        # retire is a hard delete (user ruling): nothing archived remains
         commands.cmd_memory_compact_write(session, {"topic": "position-aapl-rationale", "retire": True})
         session.expire_all()
         assert commands.cmd_memory_list(session)["count"] == 0
-        assert commands.cmd_memory_list(session, include_retired=True)["count"] == 1
+        assert commands.cmd_memory_list(session, include_retired=True)["count"] == 0
+        # restore is not-found on a deleted topic
+        with pytest.raises(KernelError) as excinfo:
+            commands.cmd_memory_update(session, {"topic": "position-aapl-rationale", "restore": True})
+        assert excinfo.value.code == "DEBRIEF_NOT_FOUND"
 
-        commands.cmd_memory_update(session, {"topic": "position-aapl-rationale", "restore": True})
+        # restore still works for a legacy soft-retired row (created via SQL)
+        session.add(
+            LongTermMemory(
+                topic="position-aapl-rationale", instruments=["US:AAPL"], summary="建仓理由",
+                evidence_refs=[], time_range="{}", confidence="high", compressed_at=now,
+            )
+        )
+        session.commit()
+        session.execute(
+            text("UPDATE long_term_memories SET retired_at = :t WHERE topic = 'position-aapl-rationale'"),
+            {"t": now},
+        )
+        session.commit()
         session.expire_all()
-        assert commands.cmd_memory_list(session)["count"] == 1
+        assert commands.cmd_memory_update(
+            session, {"topic": "position-aapl-rationale", "restore": True}
+        )["restored"] is True
 
         assert commands.cmd_memory_remove(session, {"topic": "position-aapl-rationale"})["removed"] is True
         assert commands.cmd_memory_list(session)["count"] == 0

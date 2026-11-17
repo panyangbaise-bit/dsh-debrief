@@ -69,13 +69,21 @@ class Config:
     TELEGRAM_CHAT_ID: str = os.environ.get("TELEGRAM_CHAT_ID", "")
     TELEGRAM_POLL_TIMEOUT: int = int(os.environ.get("TELEGRAM_POLL_TIMEOUT", "30"))
     TELEGRAM_POLL_MAX_BACKOFF: int = int(os.environ.get("TELEGRAM_POLL_MAX_BACKOFF", "60"))
-    # Automatic push switches (opt-out via env).
-    TELEGRAM_NEWS_PUSH: bool = os.environ.get("TELEGRAM_NEWS_PUSH", "true").lower() in (
+    # Automatic push switches (opt-in via env).
+    # NEWS_PUSH defaults to false: raw per-article pushes were noisy and
+    # duplicated the agent-composed digest (scheduled debrief-news task
+    # pushes the digest through `debrief notify send` instead).
+    TELEGRAM_NEWS_PUSH: bool = os.environ.get("TELEGRAM_NEWS_PUSH", "false").lower() in (
         "1",
         "true",
         "yes",
     )
-    TELEGRAM_REPORT_PUSH: bool = os.environ.get("TELEGRAM_REPORT_PUSH", "true").lower() in (
+    # REPORT_PUSH defaults to false for the same reason: the scheduled
+    # debrief-after-market / debrief-weekly / debrief-monthly skills push a
+    # concise, link-bearing digest through `debrief notify send`; the kernel
+    # push below would duplicate it with the raw report summary. Opt back in
+    # with TELEGRAM_REPORT_PUSH=true.
+    TELEGRAM_REPORT_PUSH: bool = os.environ.get("TELEGRAM_REPORT_PUSH", "false").lower() in (
         "1",
         "true",
         "yes",

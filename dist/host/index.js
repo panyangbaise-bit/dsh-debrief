@@ -12,6 +12,7 @@ import { loadSkills, registerSkills } from './skills.js';
 import { loadSchedulePresets, registerSetupCommand } from './schedule.js';
 import { registerDashboardRoute } from './dashboard.js';
 import { registerEditRoutes, registerMemoryRoute } from './routes.js';
+import { registerProfileRoute } from './profile.js';
 import { gateWriteTools } from './edits.js';
 /**
  * Hard dependencies per the inspected access contracts: a missing service
@@ -40,6 +41,7 @@ export function apply(rawCtx, rawConfig) {
     ctx.effect(() => registerDashboardRoute(ctx, config), 'dsh-debrief: dashboard route');
     ctx.effect(() => registerEditRoutes(ctx, config), 'dsh-debrief: edit routes');
     ctx.effect(() => registerMemoryRoute(ctx, config), 'dsh-debrief: memory route');
+    ctx.effect(() => registerProfileRoute(ctx, config), 'dsh-debrief: profile route');
     // v2 approval gate: agent-initiated portfolio writes ask the user through
     // the DSH approval confirmation flow; without approval support the ask
     // becomes a denial, so a write is refused instead of executed silently.

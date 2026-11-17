@@ -16,7 +16,7 @@ describe('setup command name', () => {
 describe('schedule presets', () => {
   const presets = loadSchedulePresets()
 
-  it('loads all eight presets', () => {
+  it('loads all nine presets in order', () => {
     expect(presets.map((preset) => preset.title)).toEqual([
       '盘后分析 · 美股',
       '盘后分析 · A股',
@@ -26,6 +26,7 @@ describe('schedule presets', () => {
       '周复盘',
       '月度复盘',
       '每日记忆压缩',
+      '投资记忆摘要',
     ])
   })
 

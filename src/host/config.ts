@@ -35,6 +35,12 @@ export interface DebriefConfig {
    */
   dashboardRefresh?: 'background' | 'inline' | 'never'
   /**
+   * How long the profile route may serve a cached payload before recomputing
+   * (default 5000 ms; 0 disables the cache). Single-flight and
+   * stale-while-error stay active either way.
+   */
+  profileCacheMs?: number
+  /**
    * Writable directory for Python bytecode caches (PYTHONPYCACHEPREFIX).
    * Defaults to `<dataDir>/pycache`; an empty string disables the injection.
    */
@@ -44,6 +50,7 @@ export interface DebriefConfig {
 }
 
 const DEFAULT_DASHBOARD_CACHE_MS = 20_000
+const DEFAULT_PROFILE_CACHE_MS = 5000
 
 export function normalizeConfig(raw: Partial<DebriefConfig> | undefined, env: NodeJS.ProcessEnv): DebriefConfig {
   const timeoutMs = Number(raw?.timeoutMs) || 15000
@@ -54,6 +61,7 @@ export function normalizeConfig(raw: Partial<DebriefConfig> | undefined, env: No
         ? 'auto'
         : 'auto'
   const cacheMs = Number(raw?.dashboardCacheMs)
+  const profileCacheMs = Number(raw?.profileCacheMs)
   const dashboardRefresh =
     raw?.dashboardRefresh === 'inline' || raw?.dashboardRefresh === 'never' || raw?.dashboardRefresh === 'background'
       ? raw.dashboardRefresh
@@ -72,6 +80,12 @@ export function normalizeConfig(raw: Partial<DebriefConfig> | undefined, env: No
         : Number.isFinite(cacheMs)
           ? Math.max(0, cacheMs)
           : DEFAULT_DASHBOARD_CACHE_MS,
+    profileCacheMs:
+      raw?.profileCacheMs === undefined
+        ? DEFAULT_PROFILE_CACHE_MS
+        : Number.isFinite(profileCacheMs)
+          ? Math.max(0, profileCacheMs)
+          : DEFAULT_PROFILE_CACHE_MS,
     dashboardRefresh,
     pycachePrefix: raw?.pycachePrefix ?? env.DEBRIEF_PYCACHE_PREFIX ?? undefined,
     telegram:

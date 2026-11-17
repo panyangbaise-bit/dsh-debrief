@@ -1,0 +1,7 @@
+{
+  "title": "投资记忆摘要",
+  "prompt": "执行技能 debrief-profile：debrief_profile 读取现有摘要与 evidence 证据包（活跃长期主题+交易纪律原文+持仓/成交结构+近期决策文档）→ 逐段合成 2-5 条带 [[cite:doc:<id>]] 引用的要点（正文禁止实时价格数字；updatedBy='user' 的段落原样保留）→ debrief_profile_write 幂等写回（部分更新 + expectedVersion CAS + protectUserSections=true；无变化则不写）→ 播报更新了哪几段与依据。生成输入只准用 debrief_profile 返回的证据包，禁止 debrief_memory 自由检索。",
+  "rrule": "DTSTART;TZID=Asia/Shanghai:20261117T033000\nRRULE:FREQ=DAILY",
+  "target": "new_once",
+  "order": 85
+}

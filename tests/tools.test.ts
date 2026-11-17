@@ -43,11 +43,18 @@ describe('tool registry', () => {
       'debrief_watchlist_add',
       'debrief_watchlist_update',
       'debrief_watchlist_remove',
+      'debrief_profile',
+      'debrief_profile_write',
     ])
   })
 
-  it('marks the three write tools as whitelisted writes with audit', () => {
-    for (const name of ['debrief_report_create', 'debrief_memory_compact_write', 'debrief_memory_add']) {
+  it('marks the four write tools as whitelisted writes with audit', () => {
+    for (const name of [
+      'debrief_report_create',
+      'debrief_memory_compact_write',
+      'debrief_memory_add',
+      'debrief_profile_write',
+    ]) {
       const tool = tools.find((candidate) => candidate.name === name)
       expect(tool).toBeDefined()
       expect(tool?.description).toContain('Whitelisted write tool')

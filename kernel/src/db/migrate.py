@@ -448,6 +448,41 @@ def _migrate_v16_ltm_retired_at(conn: Connection) -> None:
         conn.execute(text("ALTER TABLE long_term_memories ADD COLUMN retired_at DATETIME"))
 
 
+def _migrate_v17_memory_profile(conn: Connection) -> None:
+    """memory_profile: single-row investment-memory digest (plan/kernel.md §1).
+
+    Guard-and-skip: CREATE IF NOT EXISTS + INSERT WHERE NOT EXISTS make the
+    step idempotent whether or not ``Base.metadata.create_all`` already built
+    the table (open_engine runs create_all before migrations). The seed row
+    has version=0 / sections='[]' = "never generated"; `profile get` pads the
+    six canonical sections with empty content so the UI contract is stable.
+    """
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS memory_profile (
+                id            INTEGER PRIMARY KEY,
+                sections      JSON NOT NULL DEFAULT '[]',
+                markdown      TEXT NOT NULL DEFAULT '',
+                version       INTEGER NOT NULL DEFAULT 0,
+                updated_at    DATETIME NOT NULL,
+                updated_by    VARCHAR(10) NOT NULL DEFAULT 'system',
+                evidence_refs JSON NOT NULL DEFAULT '[]'
+            )
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            INSERT INTO memory_profile (id, sections, markdown, version, updated_at, updated_by, evidence_refs)
+            SELECT 1, '[]', '', 0, CURRENT_TIMESTAMP, 'system', '[]'
+            WHERE NOT EXISTS (SELECT 1 FROM memory_profile WHERE id = 1)
+            """
+        )
+    )
+
+
 def _migrate_v15_catalog_asset_class(conn: Connection) -> None:
     """instrument_catalog: unique (market, symbol) → (market, symbol, asset_class).
 
@@ -576,6 +611,7 @@ MIGRATIONS = [
     ("v14_price_cache_fetched_at", _migrate_v14_price_cache_fetched_at),
     ("v15_catalog_asset_class", _migrate_v15_catalog_asset_class),
     ("v16_ltm_retired_at", _migrate_v16_ltm_retired_at),
+    ("v17_memory_profile", _migrate_v17_memory_profile),
 ]
 
 

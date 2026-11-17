@@ -4,12 +4,13 @@ import { loadSkills, parseSkillMarkdown } from '../src/host/skills'
 describe('skill loading', () => {
   const skills = loadSkills()
 
-  it('loads the five scheduled skills with kebab-case names', () => {
+  it('loads the six scheduled skills with kebab-case names', () => {
     expect(skills.map((skill) => skill.name)).toEqual([
       'debrief-after-market',
       'debrief-compact',
       'debrief-monthly',
       'debrief-news',
+      'debrief-profile',
       'debrief-weekly',
     ])
   })
@@ -37,6 +38,16 @@ describe('skill loading', () => {
     const compact = skills.find((skill) => skill.name === 'debrief-compact')!
     expect(compact.content).toContain('debrief_memory_compact_write')
     expect(compact.content).toContain('debrief_memory_add')
+  })
+
+  it('pushes a concise, link-bearing digest from every review skill', () => {
+    for (const name of ['debrief-after-market', 'debrief-weekly', 'debrief-monthly']) {
+      const review = skills.find((skill) => skill.name === name)!
+      expect(review.content).toContain('debrief_telegram')
+      expect(review.content).toContain('可点击')
+      // Telegram digest must stay short: the raw report is never forwarded.
+      expect(review.content).toContain('不推完整报告')
+    }
   })
 })
 

@@ -58,6 +58,18 @@ def build_document(conn, obj, operation, previous=None, actor=None, backfill=Fal
     # Running ledger rows are not yet a report.
     if source == "run" and data.get("status") == "running":
         return None
+    # Profile write audits must not become memory evidence: the profile is a
+    # projection of memory, and capturing its audit rows would feed the next
+    # regeneration with its own output (write → feedback doc → regenerate →
+    # write …). Dual condition (plan/README.md A4): target_type anchor plus
+    # any profile.* action naming. Audit rows stay in user_actions; only the
+    # feedback document is skipped. Covers both this after_flush path and
+    # backfill_batch, which builds documents directly.
+    if source == "feedback" and (
+        data.get("target_type") == "memory_profile"
+        or str(data.get("action") or "").startswith("profile.")
+    ):
+        return None
     now = utcnow()
     relations = []
     ticker, market, name = data.get("ticker"), data.get("market"), data.get("name")

@@ -75,6 +75,23 @@ def _md_to_telegram_html(text: str) -> str:
     # --- 2. Inline code (`...`) ---
     text = re.sub(r"`([^`]+?)`", r"<code>\1</code>", text)
 
+    # --- 2b. Keep generated <pre>/<code> blocks opaque ---
+    # Emphasis, link and horizontal-rule substitutions must not touch code
+    # (`a_b_c` in a code span is not italic; a URL in code is not a link).
+    code_blocks = []
+
+    def _code_placeholder(match: re.Match) -> str:
+        token = f"PACODETOKEN{len(code_blocks)}END"
+        code_blocks.append(match.group(0))
+        return token
+
+    text = re.sub(
+        r"(<pre>.*?</pre>|<code>.*?</code>)",
+        _code_placeholder,
+        text,
+        flags=re.DOTALL,
+    )
+
     # --- 3. Horizontal rules ---
     text = re.sub(r"^[-*_]{3,}$", "▬▬▬▬▬▬▬▬", text, flags=re.MULTILINE)
 
@@ -103,24 +120,67 @@ def _md_to_telegram_html(text: str) -> str:
     # --- 5. Headings (### Title) → bold ---
     text = re.sub(r"^#{1,4}\s+(.+)$", r"<b>\1</b>", text, flags=re.MULTILINE)
 
-    # --- 6. Bold (**text** or __text__) ---
+    # --- 6. Protect clickable links from the emphasis substitutions below ---
+    # News / report URLs routinely contain underscores
+    # (e.g. wallstreetcn.com/articles/abc_def). The italic rule below would
+    # rewrite "_def_" into <i> and corrupt the generated <a href>, so extract
+    # every finished anchor into a placeholder and restore it after emphasis.
+    # <pre>/<code> blocks stay opaque: a URL inside code is code, not a link.
+    links = []
+
+    def _link_placeholder(anchor: str) -> str:
+        token = f"PALINKTOKEN{len(links)}END"
+        links.append(anchor)
+        return token
+
+    def _md_link(match: re.Match) -> str:
+        label = match.group(1)
+        url = _safe_source_url(unescape(match.group(2).strip()))
+        if not url:
+            return match.group(0)
+        anchor = f'<a href="{escape(url, quote=True)}">{escape(label, quote=False)}</a>'
+        return _link_placeholder(anchor)
+
+    def _bare_url_link(match: re.Match) -> str:
+        raw = match.group(1)
+        trailing = ""
+        while raw and raw[-1] in ".,;:!?、":
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        url = _safe_source_url(raw)
+        if not url:
+            return match.group(0)
+        anchor = f'<a href="{escape(url, quote=True)}">{escape(raw, quote=False)}</a>'
+        return _link_placeholder(anchor) + escape(trailing, quote=False)
+
+    def _protect_links(chunk: str) -> str:
+        chunk = re.sub(r"\[([^\]\n]+?)\]\((https?://[^)\s]+)\)", _md_link, chunk)
+        chunk = re.sub(r"(https?://[^\s<>\"'）)，。；：！？]+)", _bare_url_link, chunk)
+        return chunk
+
+    text = _protect_links(text)
+
+    # --- 6b. Internal memory citations have no Telegram target; keep them readable ---
+    # `[[cite:doc:<id>]]` is a DSH report citation, not a URL. Rendering the raw
+    # token in chat is noise, so show a compact label instead of a dead token.
+    text = re.sub(r"\[\[cite:doc:(\d+)\]\]", r"记忆#\1", text)
+
+    # --- 7. Bold (**text** or __text__) ---
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
 
-    # --- 7. Italic (*text* or _text_) — but not inside URLs ---
+    # --- 8. Italic (*text* or _text*) — links are already placeholdered ---
     text = re.sub(r"(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)", r"<i>\1</i>", text)
     text = re.sub(r"(?<!_)_(?!_)([^_\n]+?)_(?!_)", r"<i>\1</i>", text)
 
-    # --- 8. Unordered list items ---
+    # --- 9. Unordered list items ---
     text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
 
-    # --- 9. Inline links [text](url) ---
-    text = re.sub(r"\[([^\]]+?)\]\(([^)]+?)\)", r'<a href="\2">\1</a>', text)
-
-    # --- 10. Strip unsupported-but-harmless markdown cruft ---
-    # Remove stray | that aren't in HTML tags (leftover from table conversion)
-    # Actually, keep them — they may be intentional separators.
-
+    # --- 10. Restore anchors, code blocks and generated citations ---
+    for index, code_block in enumerate(code_blocks):
+        text = text.replace(f"PACODETOKEN{index}END", code_block)
+    for index, anchor in enumerate(links):
+        text = text.replace(f"PALINKTOKEN{index}END", anchor)
     for index, citation in enumerate(citations):
         text = text.replace(f"PACITATIONTOKEN{index}END", citation)
     return text

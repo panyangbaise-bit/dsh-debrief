@@ -14,11 +14,13 @@ from sqlalchemy.orm import Session
 from db.models import (
     AnalysisChart,
     AnalysisReport,
+    Holding,
     JobRun,
     LongTermMemory,
     MemoryChunk,
     MemoryCompactionRun,
     MemoryDocument,
+    MemoryProfile,
     Transaction,
     WatchlistItem,
 )
@@ -220,6 +222,29 @@ def cmd_notify_status() -> dict:
         "chatIdSet": bool(chat_id),
         "tokenMask": token_mask,
     }
+
+
+def cmd_notify_send(payload: dict) -> dict:
+    """Send an agent-composed Telegram message (digest/alert).
+
+    Payload: {"text": "..."} — markdown bold/lists/links are converted to
+    Telegram HTML by notifier.notify(); long messages are split safely.
+    """
+    from notifier.telegram import is_configured, notify
+
+    text = (payload or {}).get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise KernelError(
+            "DEBRIEF_ARGS",
+            'notify send 需要非空 text 字段（payload: {"text": "..."}）',
+        )
+    if not is_configured():
+        raise KernelError(
+            "DEBRIEF_TELEGRAM_UNCONFIGURED",
+            "未配置 Telegram：请设置 TELEGRAM_BOT_TOKEN 与 TELEGRAM_CHAT_ID"
+            "（插件 Config.telegram.botToken/chatId 或内核环境变量）",
+        )
+    return {"sent": bool(notify(text))}
 
 
 # ── instruments ────────────────────────────────────────────────────────────
@@ -699,7 +724,8 @@ def cmd_memory_compact_candidates(session: Session) -> dict:
                 }
             )
     # Forgetting: operational-noise topics and stale low-confidence summaries
-    # are offered for retirement (archived, never deleted — stays auditable).
+    # are offered for retirement; retiring a topic hard-deletes it (see
+    # cmd_memory_compact_write), so the list never re-offers the same topic.
     retire_cutoff = _now() - timedelta(days=MEMORY_RETIRE_DAYS)
     retire_candidates = []
     for memory in session.scalars(
@@ -753,16 +779,20 @@ def cmd_memory_compact_write(session: Session, payload: dict) -> dict:
         ).first()
         if memory is None:
             raise KernelError("DEBRIEF_NOT_FOUND", f"active long-term memory '{topic}' not found")
-        memory.retired_at = _now()
+        memory_id, version = memory.id, memory.version
+        # Hard delete: retired topics are removed outright (same semantics as
+        # `memory remove`; evidence documents stay, dangling archived_into is
+        # accepted by the candidate filter). Nothing soft-archived remains.
+        session.delete(memory)
         record_user_action(
             session,
             "memory.retire",
             target_type="long_term_memory",
-            target_id=str(memory.id),
+            target_id=str(memory_id),
             notes=topic,
         )
         session.commit()
-        return {"id": memory.id, "version": memory.version, "retired": True}
+        return {"id": memory_id, "version": version, "retired": True, "deleted": True}
     summary = require_string(payload, "summary") or ""
     instruments = payload.get("instruments") or []
     if not isinstance(instruments, list):
@@ -980,6 +1010,423 @@ def cmd_memory_add(session: Session, payload: dict) -> dict:
     )
     session.commit()
     return {"docId": doc.id}
+
+
+# ── profile (investment memory summary) ─────────────────────────────────────
+# Contract: plan/kernel.md §3 + plan/README.md arbitration A1–A4.
+# sections 是唯一权威内容；markdown 是内核渲染缓存；updatedBy 由调用方经
+# CLI --by 派生（不信任 payload）；审计只存元数据（A3）；捕获排除见
+# memory/capture.py（A4）。
+
+PROFILE_SECTION_KEYS = (
+    "portfolio",
+    "habits",
+    "discipline",
+    "risk",
+    "advice",
+    "decisions",
+)
+PROFILE_SECTION_TITLES = {
+    "portfolio": "投资组合",
+    "habits": "交易习惯",
+    "discipline": "纪律与规则",
+    "risk": "风险画像",
+    "advice": "操作建议",
+    "decisions": "关键决策",
+}
+PROFILE_SECTION_MAX_CHARS = 2000
+PROFILE_TOTAL_MAX_CHARS = 8000
+PROFILE_EVIDENCE_REFS_MAX = 64
+PROFILE_LTM_LIMIT = 40
+PROFILE_DECISIONS_LIMIT = 10
+PROFILE_TXN_LIMIT = 20
+
+
+def _render_profile_markdown(sections: list[dict]) -> str:
+    """Deterministic display cache derived from sections (sections authoritative)."""
+    by_key = {s.get("key"): s for s in sections}
+    parts = []
+    for key in PROFILE_SECTION_KEYS:
+        content = (by_key.get(key) or {}).get("content") or ""
+        parts.append(f"## {PROFILE_SECTION_TITLES[key]}\n\n{content}")
+    return "\n\n".join(parts)
+
+
+def _profile_sections_dto(by_key: dict) -> list[dict]:
+    """Six canonical sections in fixed order; missing keys pad to empty."""
+    items = []
+    for key in PROFILE_SECTION_KEYS:
+        stored = by_key.get(key) or {}
+        items.append(
+            {
+                "key": key,
+                "title": PROFILE_SECTION_TITLES[key],
+                "content": stored.get("content") or "",
+                "updatedBy": stored.get("updatedBy"),
+                "updatedAt": stored.get("updatedAt"),
+            }
+        )
+    return items
+
+
+def _profile_evidence_package(session: Session) -> dict:
+    """Closed evidence bundle for regeneration (plan/README.md A2).
+
+    Only this bundle may feed `profile` regeneration; `memory search` stays
+    reserved for the Q&A mode. Composition: active long-term topics
+    (ops-/run: noise excluded), the trading_discipline original text,
+    a holdings + recent-transactions structure snapshot, and the freshest
+    non-feedback/run decision documents.
+    """
+    from db.repository import get_trading_discipline
+
+    long_term = []
+    for memory in session.scalars(
+        select(LongTermMemory)
+        .where(LongTermMemory.retired_at.is_(None))
+        .order_by(desc(LongTermMemory.compressed_at), desc(LongTermMemory.id))
+        .limit(PROFILE_LTM_LIMIT)
+    ).all():
+        topic = memory.topic or ""
+        if topic.startswith(("ops-", "run:")):
+            continue
+        long_term.append(
+            {
+                "topic": topic,
+                "summary": (memory.summary or "")[:400],
+                "confidence": memory.confidence or "medium",
+                "instruments": list(memory.instruments or []),
+                "compressedAt": _fmt_window(memory.compressed_at),
+            }
+        )
+
+    holdings = [
+        {
+            "market": market_to_output(h.market),
+            "symbol": h.ticker,
+            "name": h.name or h.ticker,
+            "quantity": h.shares,
+            "cost": h.cost_basis,
+            "status": h.status,
+        }
+        for h in session.scalars(
+            select(Holding)
+            .where(Holding.status == "open")
+            .order_by(Holding.market, Holding.ticker)
+        ).all()
+    ]
+
+    recent_transactions = []
+    for txn, holding in session.execute(
+        select(Transaction, Holding)
+        .join(Holding, Transaction.holding_id == Holding.id)
+        .where(Holding.status != "archived")
+        .order_by(desc(Transaction.date), desc(Transaction.id))
+        .limit(PROFILE_TXN_LIMIT)
+    ).all():
+        recent_transactions.append(
+            {
+                "market": market_to_output(holding.market),
+                "symbol": holding.ticker,
+                "action": txn.action,
+                "quantity": txn.shares,
+                "price": txn.price,
+                "date": _fmt_date(txn.date),
+                "notes": txn.notes,
+            }
+        )
+
+    recent_decisions = []
+    for doc in session.scalars(
+        select(MemoryDocument)
+        .where(
+            MemoryDocument.source_type.in_(["decision", "trade"]),
+            MemoryDocument.archived_into.is_(None),
+        )
+        .order_by(desc(MemoryDocument.occurred_at), desc(MemoryDocument.id))
+        .limit(PROFILE_DECISIONS_LIMIT)
+    ).all():
+        instruments = [
+            market_to_output(i.split(":")[0]) + ":" + i.split(":", 1)[-1]
+            if ":" in (i or "")
+            else i
+            for i in (doc.instruments or [])
+        ]
+        recent_decisions.append(
+            {
+                "docId": doc.id,
+                "title": doc.title,
+                "body": (doc.body or "")[:800],
+                "occurredAt": _fmt_date(doc.occurred_at),
+                "instruments": instruments,
+                "sourceType": doc.source_type,
+            }
+        )
+
+    discipline = get_trading_discipline(session)
+    return {
+        "longTerm": long_term,
+        "discipline": (
+            {"content": discipline.content, "updatedAt": _fmt_window(discipline.updated_at)}
+            if discipline
+            else None
+        ),
+        "portfolio": {
+            "holdings": holdings,
+            "recentTransactions": recent_transactions,
+        },
+        "recentDecisions": recent_decisions,
+    }
+
+
+def _profile_read_row(session: Session) -> Optional[MemoryProfile]:
+    row = session.get(MemoryProfile, 1)
+    if row is None:
+        return None
+    if not isinstance(row.sections, list) or not isinstance(row.evidence_refs, list):
+        raise KernelError("DEBRIEF_INTERNAL", "memory_profile JSON columns are corrupted")
+    return row
+
+
+def cmd_profile_get(session: Session) -> dict:
+    """Read the six-section profile plus the closed evidence bundle.
+
+    Never DEBRIEF_NOT_FOUND: a missing row degrades to an empty profile
+    (version=0, generated=false); the evidence bundle is still assembled so a
+    first regeneration has everything it needs.
+    """
+    row = _profile_read_row(session)
+    evidence = _profile_evidence_package(session)
+    if row is None:
+        return {
+            "version": 0,
+            "generated": False,
+            "updatedAt": "",
+            "updatedBy": "system",
+            "sections": _profile_sections_dto({}),
+            "markdown": "",
+            "evidenceRefs": [],
+            "discipline": evidence["discipline"],
+            "evidence": evidence,
+        }
+    by_key = {s.get("key"): s for s in row.sections if isinstance(s, dict)}
+    return {
+        "version": row.version or 0,
+        "generated": bool(row.version),
+        "updatedAt": _fmt_window(row.updated_at),
+        "updatedBy": row.updated_by or "system",
+        "sections": _profile_sections_dto(by_key),
+        "markdown": row.markdown or "",
+        "evidenceRefs": row.evidence_refs,
+        "discipline": evidence["discipline"],
+        "evidence": evidence,
+    }
+
+
+def cmd_profile_write(session: Session, payload: dict, by: str) -> dict:
+    """Partial-update write with CAS, per-section ownership and noop idempotency.
+
+    `by` (--by user|agent) is the caller-derived writer for every section in
+    this write; payloads never carry updatedBy (rejected). protectUserSections
+    skips user-owned sections for agent writes. Content-identical writes are
+    noops: no version bump, no audit row.
+    """
+    from db.repository import record_user_action
+
+    if by not in ("user", "agent"):
+        raise KernelError("DEBRIEF_VALIDATION", "updatedBy must be user|agent")
+
+    for forbidden in ("title", "markdown", "updatedBy", "updatedAt"):
+        if forbidden in payload:
+            raise KernelError(
+                "DEBRIEF_VALIDATION",
+                f"field '{forbidden}' is not accepted; sections are the only authoritative content",
+            )
+
+    sections_in = payload.get("sections")
+    refs_in = payload.get("evidenceRefs")
+    if sections_in is None and refs_in is None:
+        raise KernelError("DEBRIEF_VALIDATION", "at least one of sections, evidenceRefs is required")
+
+    expected_version = payload.get("expectedVersion")
+    if expected_version is not None and (
+        not isinstance(expected_version, int)
+        or isinstance(expected_version, bool)
+        or expected_version < 0
+    ):
+        raise KernelError("DEBRIEF_VALIDATION", "expectedVersion must be a non-negative integer")
+    protect = payload.get("protectUserSections")
+    if protect is not None and not isinstance(protect, bool):
+        raise KernelError("DEBRIEF_VALIDATION", "protectUserSections must be a boolean")
+
+    # ── sections validation ──────────────────────────────────────────────
+    cleaned = []
+    seen_keys = set()
+    if sections_in is not None:
+        if not isinstance(sections_in, list) or not sections_in:
+            raise KernelError("DEBRIEF_VALIDATION", "sections must be a non-empty list")
+        for item in sections_in:
+            if not isinstance(item, dict):
+                raise KernelError("DEBRIEF_VALIDATION", "each section must be an object")
+            extra = sorted(set(item) - {"key", "content"})
+            if extra:
+                raise KernelError(
+                    "DEBRIEF_VALIDATION", f"unexpected section field: {extra[0]!r}"
+                )
+            key = item.get("key")
+            if key not in PROFILE_SECTION_KEYS:
+                raise KernelError("DEBRIEF_VALIDATION", f"unknown section key: {key!r}")
+            if key in seen_keys:
+                raise KernelError("DEBRIEF_VALIDATION", f"duplicate section key: {key!r}")
+            seen_keys.add(key)
+            content = item.get("content")
+            if content is None or not isinstance(content, str):
+                raise KernelError("DEBRIEF_VALIDATION", f"section '{key}' content must be a string")
+            cleaned.append({"key": key, "content": content})
+
+    # ── evidence_refs validation (docId must exist; whole-list replace) ──
+    refs_cleaned = None
+    if refs_in is not None:
+        if not isinstance(refs_in, list):
+            raise KernelError("DEBRIEF_VALIDATION", "evidenceRefs must be a list")
+        if len(refs_in) > PROFILE_EVIDENCE_REFS_MAX:
+            raise KernelError(
+                "DEBRIEF_VALIDATION",
+                f"evidenceRefs must have at most {PROFILE_EVIDENCE_REFS_MAX} entries",
+            )
+        refs_cleaned = []
+        for ref in refs_in:
+            if not isinstance(ref, dict) or "docId" not in ref:
+                raise KernelError("DEBRIEF_VALIDATION", "each evidenceRef needs {docId}")
+            doc_id = ref.get("docId")
+            if not isinstance(doc_id, int) or isinstance(doc_id, bool) or doc_id < 1:
+                raise KernelError("DEBRIEF_VALIDATION", f"invalid docId: {doc_id!r}")
+            if session.get(MemoryDocument, doc_id) is None:
+                raise KernelError("DEBRIEF_VALIDATION", f"evidence docId {doc_id} does not exist")
+            refs_cleaned.append({"docId": doc_id})
+
+    # ── CAS + merge under the SQLite write lock ──────────────────────────
+    session.commit()  # release the validation read transaction
+    session.execute(text("BEGIN IMMEDIATE"))  # serialize concurrent writers
+    row = _profile_read_row(session)
+    if row is None:
+        row = MemoryProfile(
+            id=1, sections=[], markdown="", version=0,
+            updated_at=_now(), updated_by="system", evidence_refs=[],
+        )
+        session.add(row)
+        session.flush()
+    old_version = row.version or 0
+    if expected_version is not None and expected_version != old_version:
+        raise KernelError(
+            "DEBRIEF_CONFLICT", f"profile version is {old_version}, expected {expected_version}"
+        )
+
+    stored_map = {
+        s.get("key"): dict(s) for s in row.sections if isinstance(s, dict) and s.get("key")
+    }
+    merged = {key: dict(value) for key, value in stored_map.items()}
+    truncated, preserved = [], []
+    changed_keys = []
+    if cleaned is not None:
+        for item in cleaned:
+            key = item["key"]
+            content = item["content"]
+            current = merged.get(key) or {}
+            if protect and by == "agent" and current.get("updatedBy") == "user":
+                preserved.append(key)
+                continue
+            if len(content) > PROFILE_SECTION_MAX_CHARS:
+                if by == "user":
+                    raise KernelError(
+                        "DEBRIEF_VALIDATION",
+                        f"section '{key}' exceeds {PROFILE_SECTION_MAX_CHARS} characters",
+                    )
+                content = content[:PROFILE_SECTION_MAX_CHARS]
+                truncated.append(key)
+            merged[key] = {
+                "key": key,
+                "content": content,
+                "updatedBy": by,
+                "updatedAt": _fmt_window(_now()),
+            }
+            changed_keys.append(key)
+
+    new_sections = [merged[key] for key in PROFILE_SECTION_KEYS if key in merged]
+    total_chars = sum(len(s.get("content") or "") for s in new_sections)
+    if total_chars > PROFILE_TOTAL_MAX_CHARS:
+        raise KernelError(
+            "DEBRIEF_VALIDATION",
+            f"total section content exceeds {PROFILE_TOTAL_MAX_CHARS} characters",
+        )
+    new_markdown = _render_profile_markdown(new_sections)
+
+    old_refs = row.evidence_refs
+    refs_changed = refs_cleaned is not None and {
+        r.get("docId") for r in refs_cleaned
+    } != {r.get("docId") for r in old_refs if isinstance(r, dict)}
+
+    # Noop: identical render + identical refs → no version bump, no audit.
+    if new_markdown == (row.markdown or "") and not refs_changed:
+        return {
+            "version": old_version,
+            "updatedAt": _fmt_window(row.updated_at),
+            "updatedBy": row.updated_by or "system",
+            "noop": True,
+            "preserved": preserved,
+            "truncated": truncated,
+            "sections": _profile_sections_dto(stored_map),
+            "markdown": row.markdown or "",
+            "evidenceRefs": old_refs,
+        }
+
+    new_version = old_version + 1
+    row.sections = new_sections
+    row.markdown = new_markdown
+    row.version = new_version
+    row.updated_at = _now()
+    row.updated_by = by
+    if refs_cleaned is not None:
+        row.evidence_refs = refs_cleaned
+    session.flush()
+
+    # A3: audit metadata only — no section bodies in user_actions.payload.
+    record_user_action(
+        session,
+        "profile.write",
+        target_type="memory_profile",
+        target_id="1",
+        notes=(
+            f"v{old_version}→v{new_version} sections={','.join(sorted(changed_keys)) or '-'} "
+            f"by={by} preserved={','.join(preserved) or '-'} "
+            f"truncated={','.join(truncated) or '-'}"
+        ),
+        payload={
+            "version": new_version,
+            "previousVersion": old_version,
+            "updatedBy": by,
+            "changedSections": sorted(changed_keys),
+            "preservedSections": preserved,
+            "truncatedSections": truncated,
+            "sectionChars": {
+                key: len(merged[key].get("content") or "")
+                for key in PROFILE_SECTION_KEYS
+                if key in merged
+            },
+        },
+    )
+    session.commit()
+    return {
+        "version": new_version,
+        "updatedAt": _fmt_window(row.updated_at),
+        "updatedBy": by,
+        "noop": False,
+        "preserved": preserved,
+        "truncated": truncated,
+        "sections": _profile_sections_dto(merged),
+        "markdown": new_markdown,
+        "evidenceRefs": row.evidence_refs,
+    }
 
 
 # ── analysis prepare ───────────────────────────────────────────────────────

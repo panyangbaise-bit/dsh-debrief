@@ -353,6 +353,29 @@ class MemoryCompactionRun(Base):
         return f"<MemoryCompactionRun(id={self.id}, topic='{self.topic}', status='{self.status}')>"
 
 
+class MemoryProfile(Base):
+    """Single-row digest of the whole investment memory (plan/kernel.md §1).
+
+    ``sections`` is the only authoritative content — six canonical sections
+    stored as ``[{key, content, updatedBy, updatedAt}]``. ``markdown`` is a
+    deterministic render cache derived by the kernel at write time; external
+    markdown/title input is rejected. ``version`` starts at 0 (= never
+    generated) and bumps once per non-noop write. This table is deliberately
+    absent from memory/capture.py SOURCE_TYPES: the profile is a projection
+    of memory, not a memory event, so writing it never mints a document.
+    """
+
+    __tablename__ = "memory_profile"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sections: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    markdown: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_by: Mapped[str] = mapped_column(String(10), nullable=False, default="system")
+    evidence_refs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
 class InstrumentCatalog(Base):
     """Local instrument directory synced daily (akshare lists + CoinGecko)."""
 

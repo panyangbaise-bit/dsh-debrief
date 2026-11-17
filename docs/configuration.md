@@ -31,7 +31,7 @@
 | `dashboardCacheMs`     | number                      | `20000`                  | 路由 payload 的内存缓存时长（毫秒，0 关闭）；同 range 的并发请求合并为一次内核调用。                                                     |
 | `dashboardRefresh`     | `background\|inline\|never` | `background`             | 读时行情刷新策略：默认先返回缓存价、后台刷新；`inline` 阻塞等待实时刷新（旧行为）；`never` 只读缓存（由定时 worker 负责新鲜度）。        |
 | `pycachePrefix`        | string                      | `<dataDir>/pycache`      | 注入内核子进程的 `PYTHONPYCACHEPREFIX`：只读 venv 也能落字节码缓存；空串关闭。环境变量 `DEBRIEF_PYCACHE_PREFIX` 兜底。                   |
-| `telegram.botToken`    | string                      | 未设置                   | Telegram Bot token；与 chatId 同时设置即启用推送（复盘发布、新闻新增、提醒比对、`notify test`）。注入为内核 `TELEGRAM_BOT_TOKEN`。       |
+| `telegram.botToken`    | string                      | 未设置                   | Telegram Bot token；与 chatId 同时设置即启用推送（技能侧新闻/复盘摘要、提醒比对、`notify test`）。注入为内核 `TELEGRAM_BOT_TOKEN`。       |
 | `telegram.chatId`      | string                      | 未设置                   | 接收推送的 chat id（私聊数字 id 或频道 `@channel`）；注入为内核 `TELEGRAM_CHAT_ID`。                                                     |
 
 未在 schema 内的字段会被忽略。插件不持久化配置：修改 profile patch 由用户自行编辑。
@@ -61,8 +61,8 @@
 | `DEBRIEF_WHEELS_DIR`   | 轮子目录覆盖（测试用，一般不需要）。                               |
 | `TELEGRAM_BOT_TOKEN`   | 内核侧 Telegram token（插件 `telegram.botToken` 会注入覆盖）。     |
 | `TELEGRAM_CHAT_ID`     | 内核侧 Telegram chat id（插件 `telegram.chatId` 会注入覆盖）。     |
-| `TELEGRAM_NEWS_PUSH`   | `false` 关闭新闻新增推送（默认开启，且仅在已配置时生效）。         |
-| `TELEGRAM_REPORT_PUSH` | `false` 关闭复盘报告推送（默认开启，且仅在已配置时生效）。         |
+| `TELEGRAM_NEWS_PUSH`   | 新闻**原始条目**推送开关（默认关闭；摘要由定时技能经 `debrief_telegram` 推送）。设 `true` 恢复内核推送，仅在已配置时生效。 |
+| `TELEGRAM_REPORT_PUSH` | 复盘报告**原始摘要**推送开关（默认关闭；精简摘要由定时技能经 `debrief_telegram` 推送）。设 `true` 恢复内核推送，仅在已配置时生效。 |
 | `PRICE_STALE_SECONDS`  | 行情缓存视为过期的秒数（默认 120）；读侧超过此时长即实时刷新。     |
 | `DEBRIEF_FX_<CCY>`     | 汇率离线兜底：每 1 CNY 兑换多少 `CCY`（如 `DEBRIEF_FX_USD=7.2`）。 |
 
@@ -73,9 +73,10 @@
   `--no-refresh` 只读缓存）；未安装 collectors 时静默降级为缓存数据。
 - **汇率**：dashboard 附 `fx` 块（免费接口 open.er-api.com，无需密钥，可接受秒级
   延迟），投资组合页面据此提供 CNY/USD/HKD 总资产切换；接口失败时仅按 CNY 展示。
-- **Telegram**：仅发不收（send-only）。新闻由内核 worker 采集后推送；复盘报告由
-  `report create` 写回时推送；可用 `debrief notify status` 查看状态、`notify test`
-  发送测试消息（未配置返回 `DEBRIEF_TELEGRAM_UNCONFIGURED`）。
+- **Telegram**：仅发不收（send-only）。新闻与复盘摘要都由定时技能经 `debrief_telegram`
+  推送（内核 worker 的原始新闻推送与 `report create` 的原始报告推送默认关闭，避免与
+  技能侧 digest 重复、且保证来源链接可点击）；可用 `debrief notify status` 查看状态、
+  `notify test` 发送测试消息（未配置返回 `DEBRIEF_TELEGRAM_UNCONFIGURED`）。
 
 ## UI 相关说明
 
@@ -109,7 +110,7 @@ The plugin is configured in the profile patch layer (the `- id: debrief` row of
 | `timeoutMs`            | number                    | `15000`                  | Per-call kernel timeout in ms; expiry returns `DEBRIEF_TIMEOUT`.                                                                                                                |
 | `enableSetup`          | boolean                   | `true`                   | Register the `debrief-setup` human command (idempotently registers 8 scheduled tasks).                                                                                          |
 | `enableDashboardRoute` | boolean                   | `true`                   | Serve the read-only route `/api/debrief/dashboard?range=30\|90\|200\|365` through the DSH-authenticated connection fetch channel (owner cookie only).                           |
-| `telegram.botToken`    | string                    | unset                    | Telegram Bot token; set together with chatId to enable pushes (published reports, new news items, watchlist reminders, `notify test`). Injected as kernel `TELEGRAM_BOT_TOKEN`. |
+| `telegram.botToken`    | string                    | unset                    | Telegram Bot token; set together with chatId to enable pushes (skill-composed news/report digests, watchlist reminders, `notify test`). Injected as kernel `TELEGRAM_BOT_TOKEN`. |
 | `telegram.chatId`      | string                    | unset                    | Chat id that receives pushes (numeric private id or `@channel`); injected as kernel `TELEGRAM_CHAT_ID`.                                                                         |
 
 Unknown fields are ignored. The plugin never persists configuration; the profile
@@ -124,8 +125,8 @@ patch belongs to the user.
 | `DEBRIEF_WHEELS_DIR`   | Wheel directory override (tests; usually unnecessary).                                                |
 | `TELEGRAM_BOT_TOKEN`   | Kernel-side Telegram token (plugin `telegram.botToken` overrides).                                    |
 | `TELEGRAM_CHAT_ID`     | Kernel-side Telegram chat id (plugin `telegram.chatId` overrides).                                    |
-| `TELEGRAM_NEWS_PUSH`   | `false` disables news pushes (on by default; only when configured).                                   |
-| `TELEGRAM_REPORT_PUSH` | `false` disables report pushes (on by default; only when configured).                                 |
+| `TELEGRAM_NEWS_PUSH`   | Raw news-item pushes (off by default; digests are pushed by the scheduled skills via `debrief_telegram`). Set `true` to re-enable.   |
+| `TELEGRAM_REPORT_PUSH` | Raw report-summary pushes (off by default; digests are pushed by the scheduled skills via `debrief_telegram`). Set `true` to re-enable. |
 | `PRICE_STALE_SECONDS`  | Seconds after which cached quotes count as stale (default 120); read commands refresh live beyond it. |
 | `DEBRIEF_FX_<CCY>`     | Offline FX fallback: `<CCY>` units per 1 CNY (e.g. `DEBRIEF_FX_USD=7.2`).                             |
 
@@ -138,10 +139,11 @@ patch belongs to the user.
 - **FX**: the dashboard payload carries an `fx` block (free open.er-api.com, no
   key, seconds of latency accepted) which powers the CNY/USD/HKD total-assets
   switcher on the Portfolio page; on provider failure the page shows CNY only.
-- **Telegram**: send-only. News is pushed when the kernel worker collects new
-  items; reports are pushed when `report create` writes them back. Check with
-  `debrief notify status`, test with `notify test` (unconfigured →
-  `DEBRIEF_TELEGRAM_UNCONFIGURED`).
+- **Telegram**: send-only. News and report digests are pushed by the scheduled
+  skills through `debrief_telegram` (the kernel's raw news push and raw
+  `report create` push are off by default so they cannot duplicate the skill
+  digest or lose clickable source links). Check with `debrief notify status`,
+  test with `notify test` (unconfigured → `DEBRIEF_TELEGRAM_UNCONFIGURED`).
 
 ## UI notes
 

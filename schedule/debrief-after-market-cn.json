@@ -1,6 +1,6 @@
 {
   "title": "盘后分析 · A股",
-  "prompt": "执行技能 debrief-after-market，市场 market=cn（A股）。按技能步骤完成：debrief_analyze 打包输入 → 生成结构化盘后结论 → debrief_report_create 写回内核（必传 prepare 返回的 jobId）→ debrief_jobs 核对状态。最后在会话内播报结论摘要。输出前先陈述数据边界：报价时点与是否处于交易时段、记忆候选是否命中（未命中要写明）、新闻是否跨市场；持平快照不得当作当日涨跌。",
+  "prompt": "执行技能 debrief-after-market，市场 market=cn（A股）。按技能步骤完成：debrief_analyze 打包输入 → 生成结构化盘后结论 → debrief_report_create 写回内核（必传 prepare 返回的 jobId）→ debrief_jobs 核对状态。最后在会话内播报结论摘要。输出前先陈述数据边界：报价时点与是否处于交易时段、记忆候选是否命中（未命中要写明）、新闻是否跨市场；持平快照不得当作当日涨跌。 → 写回后按技能格式调用 debrief_telegram(action=\"send\") 推送精简复盘（≤800 字：一句话 / 关键变化要点 / 组合影响 / 操作信号；来源用 [来源名](url) 可点击链接；不推完整报告）。",
   "rrule": "DTSTART;TZID=Asia/Shanghai:20261109T153000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
   "target": "new_once",
   "order": 20

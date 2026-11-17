@@ -181,6 +181,20 @@ def build_parser() -> argparse.ArgumentParser:
     mr = mem.add_parser("remove", help="delete a long-term memory (payload on stdin)")
     add_json(mr)
 
+    p = sub.add_parser("profile", help="read/write the investment memory profile")
+    prf = p.add_subparsers(dest="profile_command", required=True)
+    pg = prf.add_parser("get", help="read the six-section profile + closed evidence bundle")
+    add_json(pg)
+    pw = prf.add_parser("write", help="write profile sections (payload on stdin)")
+    pw.add_argument(
+        "--by",
+        choices=["user", "agent"],
+        required=True,
+        dest="profile_by",
+        help="write origin: user (inline edit) or agent (model write); the kernel stamps every written section with this value",
+    )
+    add_json(pw)
+
     p = sub.add_parser("analysis", help="prepare an after-market input package")
     an = p.add_subparsers(dest="analysis_command", required=True)
     ap = an.add_parser("prepare")
@@ -224,12 +238,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base", default="CNY")
     add_json(p)
 
-    p = sub.add_parser("notify", help="Telegram notification test/status")
+    p = sub.add_parser("notify", help="Telegram notification test/status/send")
     nt = p.add_subparsers(dest="notify_command", required=True)
     nt_test = nt.add_parser("test", help="send a test push")
     add_json(nt_test)
     nt_status = nt.add_parser("status", help="report configuration state (masked)")
     add_json(nt_status)
+    nt_send = nt.add_parser(
+        "send",
+        help="send an agent-composed message (payload on stdin: {'text': '...'})",
+    )
+    add_json(nt_send)
 
     p = sub.add_parser("migrate", help="apply pending migrations (idempotent)")
     add_json(p)
@@ -268,6 +287,16 @@ def dispatch(args: argparse.Namespace) -> dict:
         session, _ = open_session(resolve_db(args))
         try:
             return c.cmd_report_create(session, payload)
+        finally:
+            session.close()
+
+    if command == "profile" and args.profile_command == "write":
+        from debrief import commands as c
+
+        payload = read_stdin_json()
+        session, _ = open_session(resolve_db(args))
+        try:
+            return c.cmd_profile_write(session, payload, by=args.profile_by)
         finally:
             session.close()
 
@@ -311,6 +340,9 @@ def dispatch(args: argparse.Namespace) -> dict:
             return c.cmd_notify_test()
         if args.notify_command == "status":
             return c.cmd_notify_status()
+        if args.notify_command == "send":
+            payload = read_stdin_json()
+            return c.cmd_notify_send(payload)
         raise UsageError(f"unknown notify subcommand: {args.notify_command}")
 
     if command == "worker":
@@ -374,6 +406,10 @@ def dispatch(args: argparse.Namespace) -> dict:
             if args.memory_command == "compact-candidates":
                 return c.cmd_memory_compact_candidates(session)
             raise UsageError(f"unknown memory subcommand: {args.memory_command}")
+        if command == "profile":
+            if args.profile_command == "get":
+                return c.cmd_profile_get(session)
+            raise UsageError(f"unknown profile subcommand: {args.profile_command}")
         if command == "analysis":
             if args.analysis_command != "prepare":
                 raise UsageError(f"unknown analysis subcommand: {args.analysis_command}")

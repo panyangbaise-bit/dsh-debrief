@@ -13,7 +13,7 @@ whenToUse: 触发条件：DSH Schedule 每日记忆压缩任务交付（02:30 As
 
 ## 步骤 / Steps
 
-1. **取候选**：调用 `debrief_memory`，参数 `compactCandidates: true`（内核映射 `memory compact-candidates --json`）。候选 = 超出短期窗口（默认 30 天）且未压缩的 `memory_documents`，每条带 docId/topic/instruments/sourceType/content。内核已排除 `run` 源类型的任务执行日志（prices/reminders/news 台账），这些不是投资记忆。
+1. **取候选**：调用 `debrief_memory`，参数 `compactCandidates: true`（内核映射 `memory compact-candidates --json`）。候选 = 超出短期窗口（默认 30 天）且未压缩的 `memory_documents`，每条带 docId/topic/instruments/sourceType/content。内核已排除 `run` 源类型的任务执行日志（prices/reminders/news 台账），这些不是投资记忆。**无论 `batches` / `pendingCount` 是否为 0，都要读取并处理 `retireCandidates` 列表**（见步骤 7）。
 2. **分组**：按 `topic` 分组（source_type + instrument 或语义聚类）；每批 ≤30 条；批内读每条原文与 docId。
 3. **生成摘要**：每个 topic 一组，模板固定（见输出格式）。摘要必须引用原始 docId（`[[cite:doc:<id>]]`），不得改写原意；时间范围取组内最早/最晚。
 4. **幂等写回**：对每组调用 `debrief_memory_compact_write`：
@@ -26,7 +26,7 @@ whenToUse: 触发条件：DSH Schedule 每日记忆压缩任务交付（02:30 As
    - `caveats` = 已知局限与未知。
 5. **决策沉淀**：候选里属于**决策**的条目（决策/交易类），同步 `debrief_memory_add` 沉淀为可检索快照（内容带原文与 docId 引用）。
 6. **汇报**：输出压缩统计（组数、覆盖 docId 列表、写回的 id/version）。
-7. **遗忘（retire）**：输入包自带 `retireCandidates`。`ops-*` 主题是任务日志噪声，逐条 `debrief_memory_compact_write`（`retire: true`）；低置信度且超过 180 天未更新的主题，只有被新判断取代时才 retire，否则保留。播报里单列「退役 n 条」。
+7. **遗忘（retire）**：输入包自带 `retireCandidates`。这一步**每次都必做**——即使 `batches`/`pendingCount` 为 0，只要 `retireCandidates` 非空就必须逐条处理：`ops-*` 主题是任务日志噪声，逐条 `debrief_memory_compact_write`（`retire: true`，内核会**直接物理删除**该主题，不可恢复）；低置信度且超过 180 天未更新的主题，只有被新判断取代时才 retire，否则保留。播报里单列「退役 n 条」。
 8. **问答晋升**：`conversation` / `note` 类候选与决策类同等对待，按 topic 压缩成长期记忆（用户投资问答是最重要的记忆来源之一，不得丢弃）。
 
 ## IRON 约束 / Iron rules

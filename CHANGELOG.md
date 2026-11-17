@@ -44,6 +44,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ETF 失败时改用新浪 ETF 榜（927 条，自动去掉 sh/sz 前缀）。
   港股/美股仍只有东财一个源，失败时回退实时 suggest（未变）。
 
+- **Telegram Markdown 链接会被斜体规则改写** — 链接/裸 URL 在强调替换前先提取为占位符，
+  URL 中的 `_`（如 `wallstreetcn.com/articles/abc_def`）不再被转成 `<i>` 而让 `<a href>`
+  失效（引用不可点击）；`<code>` / `<pre>` 内的内容也不再被强调或链接化；
+  报告/记忆里的 `[[cite:doc:<id>]]` 在 Telegram 中渲染为可读的 `记忆#<id>`。
+
 ### Changed
 
 - **目录主键扩成 (market, symbol, asset_class)**（migration v15，内核 0.4.0）：
@@ -66,6 +71,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   权证/牛熊证/债券占绝大多数，按 Category 过滤，代码补零到 5 位）。
   四个市场目录现在都有本地覆盖：US 13 248 / HK 3 279 / CN 34 852 / CC 1 688，
   搜索 4–29 ms。
+
+- **复盘 Telegram 推送改为技能侧精简摘要** — `debrief-after-market` / `debrief-weekly` /
+  `debrief-monthly` 写回报告后调用 `debrief_telegram` 推送精简摘要（盘后 ≤800 字、周/月
+  ≤700 字；**加粗**分区、`- ` 要点列表、新闻来源 `[来源](url)` 可点击跳转、数据边界压成 1 行）；
+  内核 `report create` 的原始摘要推送默认关闭（`TELEGRAM_REPORT_PUSH=true` 可恢复），
+  避免与技能摘要重复推送长文。同轮修正 `TELEGRAM_NEWS_PUSH` 默认值的文档口径（代码默认已是 false）。
 
 ### Known limitations
 

@@ -118,7 +118,7 @@ export function registerSetupCommand(
   try {
     return ctx.commands.register({
       name: SETUP_COMMAND_NAME,
-      description: '校验 debrief 内核并幂等注册全部定时复盘任务（盘后 ×4 市场 / 新闻 / 周复盘 / 月度 / 记忆压缩）',
+      description: '校验 debrief 内核并幂等注册全部定时复盘任务（盘后 ×4 市场 / 新闻 / 周复盘 / 月度 / 记忆压缩 / 投资记忆摘要）',
       async handler() {
         try {
           // In managed mode this call bootstraps the venv on first use.
