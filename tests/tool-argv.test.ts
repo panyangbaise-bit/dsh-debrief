@@ -93,6 +93,22 @@ describe.skipIf(process.platform === 'win32')('tool argv assembly', () => {
     expect(loggedArgv()).toEqual([['holdings', 'add', '--json']])
   })
 
+  it('keeps the notify subcommand when stdinFrom is present (telegram send)', async () => {
+    // Regression: the stdinFrom branch used to drop argsOf, so the kernel saw
+    // `notify --json` without notify_command → DEBRIEF_USAGE invalid command line.
+    rmSync(logPath, { force: true })
+    const result = await byName('debrief_telegram').execute({ action: 'send', text: '盘后复盘' }, ctx())
+    expect(result).toMatchObject({ ok: true })
+    expect(loggedArgv()).toEqual([['notify', 'send', '--json']])
+  })
+
+  it('keeps the notify subcommand when stdinFrom is present (telegram status)', async () => {
+    rmSync(logPath, { force: true })
+    const result = await byName('debrief_telegram').execute({ action: 'status' }, ctx())
+    expect(result).toMatchObject({ ok: true })
+    expect(loggedArgv()).toEqual([['notify', 'status', '--json']])
+  })
+
   it('passes since/until through to transactions', async () => {
     rmSync(logPath, { force: true })
     await byName('debrief_transactions').execute({ since: '2026-11-09T00:00:00', until: '2026-11-14T00:00:00' }, ctx())

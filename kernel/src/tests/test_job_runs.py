@@ -56,3 +56,67 @@ def test_job_run_filters_apply_before_limit():
         assert rows[0].job_id == "hourly_news"
         assert rows[0].status == "failed"
         assert rows[0].started_at == old
+
+
+def test_analysis_prepare_auto_fails_stale_running_job(seeded_db, run_cli):
+    """A running after-market job past the stale threshold must be auto-failed
+    (DEBRIEF_JOB_STALE) so a crashed agent session cannot wedge the market."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from db.models import JobRun
+
+    engine = create_engine(f"sqlite:///{seeded_db}")
+    with Session(engine) as db:
+        stale = JobRun(
+            job_id="after-market-hk",
+            job_name="盘后分析 · 港股",
+            status="running",
+            started_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=200),
+        )
+        db.add(stale)
+        db.commit()
+        stale_id = stale.id
+
+    code, payload = run_cli(
+        ["--db", str(seeded_db), "analysis", "prepare", "--market", "hk", "--no-refresh"]
+    )
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["data"]["jobId"] != stale_id
+
+    with Session(engine) as db:
+        row = db.get(JobRun, stale_id)
+        assert row.status == "failed"
+        assert row.error_code == "DEBRIEF_JOB_STALE"
+        assert "stale" in row.details
+
+
+def test_analysis_prepare_blocks_fresh_running_job(seeded_db, run_cli):
+    """A running job under the stale threshold still blocks a second prepare."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from db.models import JobRun
+
+    engine = create_engine(f"sqlite:///{seeded_db}")
+    with Session(engine) as db:
+        fresh = JobRun(
+            job_id="after-market-hk",
+            job_name="盘后分析 · 港股",
+            status="running",
+            started_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        db.add(fresh)
+        db.commit()
+
+    code, payload = run_cli(
+        ["--db", str(seeded_db), "analysis", "prepare", "--market", "hk", "--no-refresh"]
+    )
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "DEBRIEF_JOB_ALREADY_RUNNING"

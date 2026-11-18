@@ -70,7 +70,10 @@ function tool(config, spec) {
             }
             if (spec.stdinFrom) {
                 const stdin = spec.stdinFrom(args);
-                return runCli(config, [...spec.command], { signal: exec.signal, stdin });
+                return runCli(config, [...spec.command, ...(spec.argsOf ? spec.argsOf(args) : [])], {
+                    signal: exec.signal,
+                    stdin,
+                });
             }
             if (spec.argsOf) {
                 return runCli(config, [...spec.command, ...spec.argsOf(args)], { signal: exec.signal });

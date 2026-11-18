@@ -40,6 +40,35 @@ def seed_holding(session, ticker="AAPL", market="US"):
     return create_holding(session, ticker, market, shares=10, cost_basis=100.0)
 
 
+def test_news_ledger_succeeds_when_outcome_holds_orm_rows(engine, monkeypatch):
+    """Regression: _ledger used to json.dumps() the outcome AFTER the session
+    closed; collect_news returns ORM NewsArticle rows, so every news poll hit
+    DetachedInstanceError and landed in the ledger as failed with
+    DEBRIEF_UPSTREAM_NEWS even though the fetch succeeded."""
+    import debrief.worker as worker
+    from db.models import JobRun
+    from sqlalchemy import select
+
+    class FakeNewsAdapter:
+        def get_latest_news(self, limit=10):
+            return [
+                {
+                    "title": "标题一",
+                    "url": "https://example.com/1",
+                    "published_at": "2026-11-18T12:00:00+08:00",
+                    "summary": "摘要",
+                }
+            ]
+
+    monkeypatch.setattr("adapters.news.WallStreetCNAdapter", FakeNewsAdapter)
+    worker._ledger(engine, "news", "新闻轮询", "DEBRIEF_UPSTREAM_NEWS", worker.collect_news)()
+
+    with Session(engine) as db:
+        row = db.scalars(select(JobRun)).one()
+        assert row.status == "succeeded"
+        assert row.error_code is None
+
+
 def test_dry_run_schedule_table(tmp_path, monkeypatch):
     import importlib
 

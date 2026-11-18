@@ -116,9 +116,13 @@ def _ledger(engine, job_id: str, job_name: str, error_code: str, func):
             session = Session(engine)
             try:
                 outcome = func(session)
+                # Serialize while the session is still open: several tasks
+                # return ORM rows inside the outcome, and repr/dumps on a
+                # detached instance raises DetachedInstanceError, which used
+                # to fail the whole ledger row after a successful collection.
+                details = json.dumps(outcome, ensure_ascii=False, default=str)[:1000]
             finally:
                 session.close()
-            details = json.dumps(outcome, ensure_ascii=False, default=str)[:1000]
             session = Session(engine)
             try:
                 finish_job_run(session, run_id, "succeeded", details=details)

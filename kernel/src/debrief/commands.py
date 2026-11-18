@@ -38,6 +38,11 @@ from memory.indexer import tokens as tokenize
 
 logger = logging.getLogger(__name__)
 
+# A "running" after-market job older than this is presumed orphaned (its agent
+# session died before writing the report) and is auto-failed on the next
+# prepare instead of blocking the market forever.
+AFTER_MARKET_STALE_MINUTES = int(os.environ.get("AFTER_MARKET_STALE_MINUTES", "90"))
+
 MEMORY_SHORT_TERM_DAYS = int(os.environ.get("MEMORY_SHORT_TERM_DAYS", "30"))
 MEMORY_SHORT_TERM_MAX = int(os.environ.get("MEMORY_SHORT_TERM_MAX", "500"))
 MEMORY_RETIRE_DAYS = int(os.environ.get("MEMORY_RETIRE_DAYS", "180"))
@@ -1581,9 +1586,31 @@ def cmd_analysis_prepare(
         select(JobRun).where(JobRun.job_id == kind, JobRun.status == "running")
     ).first()
     if running is not None:
-        raise KernelError(
-            "DEBRIEF_JOB_ALREADY_RUNNING",
-            f"job {running.id} ({KIND_LABELS.get(kind, kind)}) is already running",
+        # A crashed/aborted agent leaves its job "running" forever, which would
+        # block every future prepare of this market (DEBRIEF_JOB_ALREADY_RUNNING).
+        # Auto-fail runs older than the stale threshold so one dead session
+        # cannot wedge the whole pipeline.
+        age = _now() - running.started_at if running.started_at else timedelta(0)
+        if age <= timedelta(minutes=AFTER_MARKET_STALE_MINUTES):
+            raise KernelError(
+                "DEBRIEF_JOB_ALREADY_RUNNING",
+                f"job {running.id} ({KIND_LABELS.get(kind, kind)}) is already running",
+            )
+        from db.repository import finish_job_run
+
+        finish_job_run(
+            session,
+            running.id,
+            "failed",
+            details=f"auto-failed: running for {int(age.total_seconds() // 60)}m, past the "
+            f"{AFTER_MARKET_STALE_MINUTES}m stale threshold",
+            error_code="DEBRIEF_JOB_STALE",
+        )
+        logger.warning(
+            "auto-failed stale running job %s (%s) after %dm",
+            running.id,
+            kind,
+            int(age.total_seconds() // 60),
         )
     run = create_job_run(session, kind, KIND_LABELS.get(kind, kind))
 

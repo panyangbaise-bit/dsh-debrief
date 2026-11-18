@@ -25,6 +25,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **新闻轮询连续失败（DEBRIEF_UPSTREAM_NEWS）** — 台账在 session 关闭后才
+  `json.dumps` 结果，而 `collect_news` 返回含 ORM `NewsArticle` 行的 outcome，
+  `repr` 触发 `DetachedInstanceError`，导致抓取成功也被记为上游失败。
+  序列化改在 session 打开期间完成，补 `test_news_ledger_succeeds_when_outcome_holds_orm_rows`
+  回归用例（修复前该路径恒 failed）。
+- **`debrief_telegram` 全部动作报 DEBRIEF_USAGE** — `tool()` 的 `stdinFrom`
+  分支把 CLI 调用短路成 `notify --json`（漏掉了 `argsOf` 生成的
+  `send`/`status`/`test` 子命令），内核 argparse 因缺 `notify_command` 返回
+  `invalid command line`，盘后复盘/周复盘/月度复盘的 Telegram 精简推送因此
+  全部静默失败。现在 `stdinFrom` 分支同样拼接 `argsOf`，并补了
+  `tests/tool-argv.test.ts` 两条回归用例（send/status 的 argv 断言）。
+### Fixed
+
 - **场外基金搜不到** — the CN open-end fund catalog was capped at 6 000 codes,
   but akshare returns ≈28 000 sorted by code, so every `01xxxx`/`02xxxx` fund
   (including 华夏半导体材料设备ETF联接C `020357` and 华夏科创50ETF联接C
