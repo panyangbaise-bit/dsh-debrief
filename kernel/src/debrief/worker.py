@@ -161,6 +161,18 @@ def collect_prices(session: Session) -> dict:
     ).all():
         targets.add((item.market.upper(), item.ticker.upper()))
 
+    # Benchmark fallback: markets with no holdings/watchlist targets still get
+    # their benchmark tickers cached every cycle (e.g. CRYPTO → BTC/ETH), so
+    # the after-market input package reads fresh quotes without a live fetch.
+    from debrief.commands import MARKET_BENCHMARK_TICKERS
+
+    covered = {market for market, _ in targets}
+    for market, tickers in MARKET_BENCHMARK_TICKERS.items():
+        if market in covered:
+            continue
+        for ticker in tickers:
+            targets.add((market, ticker.upper()))
+
     ok, failed = 0, []
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     for market, ticker in sorted(targets):

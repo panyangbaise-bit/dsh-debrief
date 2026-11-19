@@ -134,15 +134,60 @@ def test_collect_prices_upserts_and_tolerates_failure(engine, monkeypatch):
         seed_holding(session, "AAPL", "US")
         seed_holding(session, "NVDA", "US")
         result = collect_prices(session)
-    assert result["saved"] == 2
+    # US holdings (2) + CRYPTO benchmark fallback (BTC, ETH) since CRYPTO has
+    # no holdings/watchlist targets.
+    assert result["saved"] == 4
     assert result["failed"] == []
 
     from db.models import PriceCache
 
     with Session(engine) as session:
         rows = session.scalars(select(PriceCache)).all()
-        assert len(rows) == 2
+        assert len(rows) == 4
         assert all(row.close == 123.45 for row in rows)
+
+
+def test_collect_prices_collects_benchmark_tickers_for_empty_market(engine, monkeypatch):
+    """Regression: a market with no positions/watchlist (e.g. CRYPTO after the
+    strategic exit) still gets its benchmark tickers cached each cycle, so the
+    after-market package has fresh quotes instead of an empty list."""
+    from debrief import worker
+
+    monkeypatch.setattr(worker, "_adapters_registered", False)
+    monkeypatch.setattr(worker, "_registry", None)
+    monkeypatch.setattr("debrief.worker._register_adapters", _fake_registry)
+
+    with Session(engine) as session:
+        result = collect_prices(session)
+    assert result["saved"] == 2
+    assert result["failed"] == []
+
+    from db.models import PriceCache
+
+    with Session(engine) as session:
+        symbols = {row.ticker for row in session.scalars(select(PriceCache)).all()}
+        assert symbols == {"BTC", "ETH"}
+
+
+def test_collect_prices_skips_benchmarks_when_market_has_targets(engine, monkeypatch):
+    """A market that already has holdings/watchlist targets must not double up
+    with benchmark tickers."""
+    from debrief import worker
+
+    monkeypatch.setattr(worker, "_adapters_registered", False)
+    monkeypatch.setattr(worker, "_registry", None)
+    monkeypatch.setattr("debrief.worker._register_adapters", _fake_registry)
+
+    with Session(engine) as session:
+        seed_holding(session, "BTC", "CRYPTO")
+        result = collect_prices(session)
+    assert result["saved"] == 1
+
+    from db.models import PriceCache
+
+    with Session(engine) as session:
+        symbols = {row.ticker for row in session.scalars(select(PriceCache)).all()}
+        assert symbols == {"BTC"}
 
 
 def _fake_registry():
@@ -166,7 +211,8 @@ def test_collect_prices_failure_never_raises(engine, monkeypatch):
     with Session(engine) as session:
         seed_holding(session, "600519", "CN")
         result = collect_prices(session)
-    assert result["saved"] == 0
+    # CN adapter fails; CRYPTO benchmark fallback (BTC, ETH) still succeeds.
+    assert result["saved"] == 2
     assert any("600519" in failure for failure in result["failed"])
 
 

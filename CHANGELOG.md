@@ -25,6 +25,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **基准标的未进定时采集** — 加密盘后输入包虽已回退 BTC/ETH 基准报价（0.6.4），
+  但 worker 每 30 分钟的价格采集仍只覆盖持仓+自选，基准行情只能靠 prepare
+  时实时抓取。现在无持仓/自选的市场会把基准标的（CRYPTO → BTC/ETH）纳入
+  常规采集缓存，盘后输入包直接读缓存；补两条 worker 回归用例。
+### Fixed
+
 - **加密货币盘后输入包 quotes 为空** — `analysis prepare` 只引用持仓+自选标的，
   加密仓 8/9 整体清仓后加密市场无任何目标，盘后报告长期「行情快照缺失」，
   被误认为行情获取失败。现在无持仓/自选的市场回退到基准标的报价
