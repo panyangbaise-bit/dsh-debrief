@@ -25,6 +25,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **加密货币盘后输入包 quotes 为空** — `analysis prepare` 只引用持仓+自选标的，
+  加密仓 8/9 整体清仓后加密市场无任何目标，盘后报告长期「行情快照缺失」，
+  被误认为行情获取失败。现在无持仓/自选的市场回退到基准标的报价
+  （CRYPTO → BTC/ETH，`MARKET_BENCHMARK_TICKERS` 可扩展），刷新与引用同源，
+  盘后输入包始终携带真实市场行情；补 `test_crypto_prepare_returns_benchmark_quotes_without_positions`
+  回归用例。
+### Fixed
+
 - **新闻轮询连续失败（DEBRIEF_UPSTREAM_NEWS）** — 台账在 session 关闭后才
   `json.dumps` 结果，而 `collect_news` 返回含 ORM `NewsArticle` 行的 outcome，
   `repr` 触发 `DetachedInstanceError`，导致抓取成功也被记为上游失败。

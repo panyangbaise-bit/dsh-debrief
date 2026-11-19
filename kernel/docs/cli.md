@@ -293,6 +293,7 @@ debrief analysis prepare --market <us|cn|hk|crypto> [--refresh | --no-refresh] [
 
 - 副作用：创建 `job_runs`（`after-market-<market>`，running）。同市场已有 running → `DEBRIEF_JOB_ALREADY_RUNNING`（防重入锁）。
 - **孤儿任务自动失败**：running 超过阈值（`AFTER_MARKET_STALE_MINUTES`，默认 90 分钟，环境变量可覆盖）的 job 视为其 agent 会话已中断，下一次 prepare 自动将其置为 `failed`（`DEBRIEF_JOB_STALE`）并继续新建，避免一次卡死永久阻塞该市场。
+- **基准标的回退**：某市场既无持仓也无自选标的时，quotes 回退到市场基准报价（`MARKET_BENCHMARK_TICKERS`，当前 CRYPTO → BTC/ETH），并参与行情刷新——盘后输入包始终携带真实市场行情，不再出现空 quotes。
 - `--refresh/--no-refresh`：行情引用生成前先刷新该市场的持仓+关注列表（同一语义与 `pricesRefreshed`/`priceErrors` 字段，见 §1）。
 - DSH agent 分析后经 `report create {jobId}` 写回并关闭 job。
 

@@ -20,6 +20,23 @@ def _now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def test_crypto_prepare_returns_benchmark_quotes_without_positions(seeded_db, run_cli):
+    """Regression: a market with no holdings/watchlist (e.g. CRYPTO after the
+    strategic exit) used to yield an empty quotes list, which read like a
+    failed quote fetch. Prepare must fall back to benchmark tickers."""
+    code, payload = run_cli(
+        ["--db", str(seeded_db), "analysis", "prepare", "--market", "crypto", "--no-refresh"]
+    )
+    assert code == 0
+    assert payload["ok"] is True
+    quotes = payload["data"]["inputs"]["quotes"]
+    symbols = {quote["symbol"] for quote in quotes}
+    assert {"BTC", "ETH"} <= symbols, f"expected BTC/ETH benchmark quotes, got {symbols}"
+    for quote in quotes:
+        assert quote["symbol"] and quote["name"]
+
+
+
 @pytest.fixture
 def db(tmp_path):
     engine = open_engine(tmp_path / "ctx.db")

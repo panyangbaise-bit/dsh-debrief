@@ -43,6 +43,15 @@ logger = logging.getLogger(__name__)
 # prepare instead of blocking the market forever.
 AFTER_MARKET_STALE_MINUTES = int(os.environ.get("AFTER_MARKET_STALE_MINUTES", "90"))
 
+# When a market has no open holdings and no watchlist entries, the after-market
+# package falls back to quoting these benchmark tickers so the report carries
+# real market data instead of an empty quotes list (which read like a failed
+# quote fetch). Tickers must exist in the market adapter's catalog.
+MARKET_BENCHMARK_TICKERS = {
+    "CRYPTO": ("BTC", "ETH"),
+}
+BENCHMARK_NAMES = {"BTC": "比特币", "ETH": "以太坊"}
+
 MEMORY_SHORT_TERM_DAYS = int(os.environ.get("MEMORY_SHORT_TERM_DAYS", "30"))
 MEMORY_SHORT_TERM_MAX = int(os.environ.get("MEMORY_SHORT_TERM_MAX", "500"))
 MEMORY_RETIRE_DAYS = int(os.environ.get("MEMORY_RETIRE_DAYS", "180"))
@@ -1617,25 +1626,32 @@ def cmd_analysis_prepare(
     from db.models import Holding
     from db.repository import get_recent_news
 
-    # Refresh quotes for this market's holdings + watchlist before quoting.
+    # Quote targets: this market's open holdings + watchlist. When the market
+    # has neither, fall back to benchmark tickers so the input package still
+    # carries market quotes (an empty quotes list reads like a failed fetch).
+    targets = {
+        (market_db, holding.ticker.upper())
+        for holding in session.scalars(
+            select(Holding).where(Holding.status == "open", Holding.market == market_db)
+        ).all()
+    }
+    targets |= {
+        (market_db, item.ticker.upper())
+        for item in session.scalars(
+            select(WatchlistItem).where(
+                WatchlistItem.status != "archived", WatchlistItem.market == market_db
+            )
+        ).all()
+    }
+    benchmark_tickers = []
+    if not targets:
+        benchmark_tickers = list(MARKET_BENCHMARK_TICKERS.get(market_db, ()))
+        targets = {(market_db, ticker.upper()) for ticker in benchmark_tickers}
+
     refresh_meta = {"pricesRefreshed": False}
     if refresh is not False:
         from debrief.kernel import _refresh_meta
 
-        targets = {
-            (market_db, holding.ticker.upper())
-            for holding in session.scalars(
-                select(Holding).where(Holding.status == "open", Holding.market == market_db)
-            ).all()
-        }
-        targets |= {
-            (market_db, item.ticker.upper())
-            for item in session.scalars(
-                select(WatchlistItem).where(
-                    WatchlistItem.status != "archived", WatchlistItem.market == market_db
-                )
-            ).all()
-        }
         refresh_meta = _refresh_meta(refresh, session, targets)
 
     quotes = []
@@ -1674,6 +1690,22 @@ def cmd_analysis_prepare(
                 "changePct": round((last - prev) / prev * 100, 2) if last and prev else None,
             }
         )
+
+    # Benchmark fallback: markets without any positions/watchlist targets still
+    # get real quotes (e.g. CRYPTO → BTC/ETH) instead of an empty list.
+    if not quotes:
+        from debrief.kernel import _two_closes
+
+        for ticker in benchmark_tickers:
+            last, prev = _two_closes(session, ticker.upper(), market_db)
+            quotes.append(
+                {
+                    "symbol": ticker.upper(),
+                    "name": BENCHMARK_NAMES.get(ticker.upper(), ticker.upper()),
+                    "price": round(last, 4) if last is not None else None,
+                    "changePct": round((last - prev) / prev * 100, 2) if last and prev else None,
+                }
+            )
 
     news = _scope_news(session, market_db, limit=12)
     candidates = _memory_candidates(session, set(seen), market_db)
