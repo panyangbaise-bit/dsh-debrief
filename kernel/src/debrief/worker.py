@@ -17,6 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from config import config
 from db.models import Holding, NewsArticle, PriceCache, WatchlistItem
 from debrief.retention import cleanup_job_runs
 
@@ -351,32 +352,150 @@ def collect_catalog(session: Session) -> dict:
     return catalog.sync_stock_catalog(session)
 
 
-def check_reminders(session: Session) -> dict:
-    """Compare watchlist targets against latest prices; no LLM involved."""
+REMINDER_MARKET_LABELS = {"US": "美股", "CN": "A股", "HK": "港股", "CRYPTO": "加密"}
+
+
+def _reminder_price(value: float) -> str:
+    """Two decimals above 1, four below (crypto can be sub-dollar)."""
+    return f"{value:,.2f}" if abs(value) >= 1 else f"{value:.4f}"
+
+
+def _reminder_name(item: WatchlistItem) -> str:
+    name = (item.name or item.ticker).strip()
+    # Catalog names are often full legal names; trim at the share-class suffix:
+    # "Duolingo, Inc. - Class A Common Stock" -> "Duolingo, Inc."
+    name = name.split(" - ")[0].strip() or item.ticker
+    return name if len(name) <= 32 else name[:31].rstrip() + "…"
+
+
+def _reminder_cooldown_label(minutes: int) -> str:
+    if minutes % 60 == 0:
+        return f"{minutes // 60} 小时"
+    return f"{minutes} 分钟"
+
+
+def _format_reminder(alerts: list, now: datetime, cooldown_minutes: int) -> str:
+    from common.time import format_display_time
+
+    lines = [f"🔔 关注价提醒 · {format_display_time(now, fmt='%m-%d %H:%M')}"]
+    for market, label in REMINDER_MARKET_LABELS.items():
+        group = [alert for alert in alerts if alert["market"] == market]
+        if not group:
+            continue
+        lines.append("")
+        lines.append(f"【{label}】")
+        lines.extend(f"- {alert['text']}" for alert in group)
+    lines.append("")
+    lines.append(
+        f"（仅交易时段推送；同一标的每 {_reminder_cooldown_label(cooldown_minutes)}最多提醒一次）"
+    )
+    return "\n".join(lines)
+
+
+def check_reminders(session: Session, now: Optional[datetime] = None) -> dict:
+    """Compare watchlist targets against latest prices; no LLM involved.
+
+    Reminder policy (user request 2026-11-25):
+    * only push inside the instrument's own regular market session — US/CN/HK
+      exchange hours, crypto is 24/7 — so a target hit no longer pings at
+      21:00 Beijing time (US pre-market) or on weekends;
+    * at most one push per instrument per ``REMINDER_COOLDOWN_MINUTES``
+      (default 2h) while the target zone stays hit;
+    * leaving the zone resets the state, so the next fresh cross alerts
+      immediately instead of waiting out the cooldown.
+    """
+    from common.market_hours import is_market_open
     from debrief.kernel import _two_closes
 
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now = now.astimezone(timezone.utc)
+    # DB timestamps are naive UTC (SQLite drops the offset); keep the stored
+    # reminder state in the same convention so cooldown math is timezone-safe.
+    now_stored = now.replace(tzinfo=None)
+    cooldown = timedelta(minutes=config.REMINDER_COOLDOWN_MINUTES)
+
     alerts = []
+    suppressed = 0
+    outside_session = 0
+    dirty = False
     for item in session.scalars(
         select(WatchlistItem).where(WatchlistItem.status != "archived")
     ).all():
-        last, _ = _two_closes(session, item.ticker, item.market.upper())
+        if not getattr(item, "alert_enabled", 1):
+            continue
+        market = (item.market or "").upper()
+        if not is_market_open(market, now):
+            outside_session += 1
+            continue
+        last, _ = _two_closes(session, item.ticker, market)
         if last is None:
             continue
         low = item.target_price_low
         high = item.target_price_high
-        if low is not None and last <= low:
-            alerts.append(f"{item.name or item.ticker} 现价 {last:.2f} ≤ 关注价 {low:.2f}")
-        if high is not None and last >= high:
-            alerts.append(f"{item.name or item.ticker} 现价 {last:.2f} ≥ 关注价 {high:.2f}")
+        hit_low = low is not None and last <= low
+        hit_high = high is not None and last >= high
+        if not (hit_low or hit_high):
+            if item.alert_active:
+                item.alert_active = 0
+                dirty = True
+            continue
+        last_alert_at = item.last_alert_at
+        if last_alert_at is not None and last_alert_at.tzinfo is not None:
+            last_alert_at = last_alert_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if (
+            item.alert_active
+            and last_alert_at is not None
+            and now_stored - last_alert_at < cooldown
+        ):
+            suppressed += 1
+            continue
+
+        name = _reminder_name(item)
+        if hit_low:
+            alerts.append(
+                {
+                    "market": market,
+                    "symbol": item.ticker,
+                    "text": f"{name} 现价 {_reminder_price(last)} ≤ 关注价 {_reminder_price(low)}",
+                }
+            )
+        if hit_high:
+            alerts.append(
+                {
+                    "market": market,
+                    "symbol": item.ticker,
+                    "text": f"{name} 现价 {_reminder_price(last)} ≥ 关注价 {_reminder_price(high)}",
+                }
+            )
+        item.alert_active = 1
+        item.last_alert_at = now_stored
+        dirty = True
+    if dirty:
+        session.commit()
+
     notified = False
     if alerts:
         try:
             from notifier.telegram import notify
 
-            notified = bool(notify("🔔 提醒比对\n\n" + "\n".join(alerts)))
+            notified = bool(
+                notify(
+                    _format_reminder(
+                        alerts, now, cooldown_minutes=config.REMINDER_COOLDOWN_MINUTES
+                    )
+                )
+            )
         except Exception:
             notified = False
-    return {"alerts": len(alerts), "details": alerts, "notified": notified}
+    return {
+        "alerts": len(alerts),
+        "details": [alert["text"] for alert in alerts],
+        "notified": notified,
+        "suppressed": suppressed,
+        "outsideSession": outside_session,
+    }
 
 
 def build_scheduler(engine) -> BackgroundScheduler:

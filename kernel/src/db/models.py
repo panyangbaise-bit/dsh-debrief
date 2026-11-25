@@ -201,6 +201,11 @@ class WatchlistItem(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="watching")
     priority: Mapped[str] = mapped_column(String(10), nullable=False, default="medium")
     alert_enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # Reminder state for the worker's `reminders` job: pushed once per cooldown
+    # window while the target zone stays hit; reset when it clears or the user
+    # edits the target/alert switch (so a fresh cross alerts immediately).
+    last_alert_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    alert_active: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

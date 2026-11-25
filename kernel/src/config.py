@@ -93,6 +93,15 @@ class Config:
     # is NULL or older than this many seconds.
     PRICE_STALE_SECONDS: int = max(10, int(os.environ.get("PRICE_STALE_SECONDS", "120")))
 
+    # Watchlist price reminders (`reminders` worker job). A target that stays
+    # hit is pushed at most once per cooldown window, and only inside the
+    # instrument's own market session (see common/market_hours.py; crypto is
+    # 24/7). Checks keep running every 15 minutes so a fresh cross is noticed
+    # quickly, but pushes are throttled by this window.
+    REMINDER_COOLDOWN_MINUTES: int = max(
+        15, int(os.environ.get("REMINDER_COOLDOWN_MINUTES", "120"))
+    )
+
     # Display / logging timezone (DB timestamps stay UTC; UI converts for display).
     # Default Beijing time. Override with e.g. APP_TIMEZONE=America/New_York
     APP_TIMEZONE: str = os.environ.get("APP_TIMEZONE", "Asia/Shanghai")

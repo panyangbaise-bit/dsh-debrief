@@ -266,3 +266,27 @@ def test_v16_adds_ltm_retired_at(tmp_path):
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(long_term_memories)"))}
     assert "retired_at" in cols
     engine.dispose()
+
+
+def test_v18_adds_watchlist_alert_state_columns(tmp_path):
+    """Reminder cooldown state survives upgrades from pre-0.6.6 databases."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-v18.db'}")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE watchlist_items (
+                    id INTEGER PRIMARY KEY,
+                    ticker VARCHAR(20) NOT NULL,
+                    market VARCHAR(10) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'watching'
+                )
+                """
+            )
+        )
+    migrate(engine)
+    with engine.connect() as conn:
+        columns = {row[1] for row in conn.execute(text("PRAGMA table_info(watchlist_items)"))}
+    assert {"last_alert_at", "alert_active"} <= columns
+    migrate(engine)  # idempotent: second run must not fail
+    engine.dispose()

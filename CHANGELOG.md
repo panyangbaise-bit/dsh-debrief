@@ -105,6 +105,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   内核 `report create` 的原始摘要推送默认关闭（`TELEGRAM_REPORT_PUSH=true` 可恢复），
   避免与技能摘要重复推送长文。同轮修正 `TELEGRAM_NEWS_PUSH` 默认值的文档口径（代码默认已是 false）。
 
+- **关注价提醒不再每 15 分钟刷屏** — worker 的 `reminders` job 改为
+  「按市场交易时段 + 2 小时冷却」：只在标的所属市场的常规交易时段内（US 09:30–16:00 ET /
+  CN 09:30–11:30、13:00–15:00 / HK 09:30–12:00、13:00–16:00 / 加密 24/7；周末不推）比对并推送，
+  同一标的持续处于关注价内时每 `REMINDER_COOLDOWN_MINUTES`（默认 120 分钟）最多提醒一次；
+  价格离开关注价区间后重新触及会立即提醒。推送文案同时按市场分组（【美股】/【A股】/
+  【港股】/【加密】），去掉法律全名尾巴；冷却状态落在 `watchlist_items.last_alert_at` /
+  `alert_active`（migration v18），worker 重启不丢。
+
 ### Known limitations
 
 

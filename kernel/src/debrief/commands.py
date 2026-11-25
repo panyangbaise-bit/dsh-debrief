@@ -2089,11 +2089,17 @@ def cmd_watchlist_update(session: Session, payload: dict) -> dict:
         if target is not None:
             target = _number(target, "targetPrice", minimum=0, allow_zero=True)
         item.target_price_low = target
+        # A new target invalidates the old reminder state: the next hit in the
+        # session should alert immediately instead of waiting out the cooldown.
+        item.alert_active = 0
+        item.last_alert_at = None
     if has_alert:
         alert = payload.get("alert")
         if not isinstance(alert, bool):
             raise KernelError("DEBRIEF_VALIDATION", "alert must be a boolean")
         item.alert_enabled = 1 if alert else 0
+        item.alert_active = 0
+        item.last_alert_at = None
     item.updated_at = _now()
     record_user_action(
         session,

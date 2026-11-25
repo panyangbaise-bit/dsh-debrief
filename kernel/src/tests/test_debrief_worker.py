@@ -1,6 +1,7 @@
 """Worker tests: schedule, fault tolerance, ledger error codes (no network)."""
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -279,13 +280,120 @@ def test_catalog_sync_falls_back_partially(engine, monkeypatch):
         assert catalog_counts(session)["CC"] == 2
 
 
-def test_check_reminders_compares_targets(engine):
+def _watch(engine, ticker="SPCX", market="US", price=125.0, target=132.0, name=None, alert=True):
+    """Seed one watchlist item plus a price row; returns nothing (DB is source of truth)."""
     from db.repository import create_watchlist_item, upsert_price
 
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     with Session(engine) as session:
-        create_watchlist_item(session, "00700", "HK", name="腾讯控股", target_price_low=380.0)
-        upsert_price(session, "00700", "HK", today, close=370.0, source="seed")
-        result = check_reminders(session)
+        item = create_watchlist_item(
+            session, ticker, market, name=name or ticker, target_price_low=target
+        )
+        if not alert:
+            item.alert_enabled = 0
+        upsert_price(session, ticker, market, today, close=price, source="seed")
+        session.commit()
+
+
+def _set_price(engine, ticker, market, price):
+    from db.repository import upsert_price
+
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    with Session(engine) as session:
+        upsert_price(session, ticker, market, today, close=price, source="seed")
+        session.commit()
+
+
+def _et(hour, minute=0):
+    return datetime(2026, 11, 25, hour, minute, tzinfo=ZoneInfo("America/New_York"))
+
+
+def test_check_reminders_compares_targets_inside_the_session(engine):
+    _watch(engine, "00700", "HK", price=370.0, target=380.0, name="腾讯控股")
+    hk_morning = datetime(2026, 11, 25, 10, 0, tzinfo=ZoneInfo("Asia/Hong_Kong"))
+    with Session(engine) as session:
+        result = check_reminders(session, now=hk_morning)
     assert result["alerts"] == 1
     assert any("00700" in detail or "腾讯" in detail for detail in result["details"])
+
+
+def test_check_reminders_only_pushes_inside_the_market_session(engine):
+    _watch(engine)
+    with Session(engine) as session:
+        premarket = check_reminders(session, now=_et(8, 0))
+        assert premarket["alerts"] == 0
+        assert premarket["outsideSession"] == 1
+        after_close = check_reminders(session, now=_et(16, 30))
+        assert after_close["alerts"] == 0
+        regular = check_reminders(session, now=_et(10, 0))
+    assert regular["alerts"] == 1
+    assert regular["notified"] is False  # Telegram unconfigured in tests
+
+
+def test_check_reminders_throttles_repeats_within_the_cooldown(engine):
+    _watch(engine)
+    with Session(engine) as session:
+        first = check_reminders(session, now=_et(10, 0))
+        second = check_reminders(session, now=_et(11, 0))
+        third = check_reminders(session, now=_et(12, 0))
+    assert first["alerts"] == 1
+    assert second["alerts"] == 0
+    assert second["suppressed"] == 1
+    assert third["alerts"] == 1
+
+
+def test_check_reminders_fresh_cross_alerts_immediately_after_recovery(engine):
+    _watch(engine)
+    with Session(engine) as session:
+        assert check_reminders(session, now=_et(10, 0))["alerts"] == 1
+    _set_price(engine, "SPCX", "US", 140.0)  # recovered above target
+    with Session(engine) as session:
+        recovered = check_reminders(session, now=_et(10, 15))
+    assert recovered["alerts"] == 0
+    _set_price(engine, "SPCX", "US", 131.0)  # dips back under the target
+    with Session(engine) as session:
+        fresh = check_reminders(session, now=_et(10, 30))
+    assert fresh["alerts"] == 1
+
+
+def test_check_reminders_crypto_is_always_in_session(engine):
+    _watch(engine, "BTC", "CRYPTO", price=90000.0, target=95000.0, name="Bitcoin")
+    with Session(engine) as session:
+        result = check_reminders(session, now=datetime(2026, 11, 25, 3, 0, tzinfo=timezone.utc))
+    assert result["alerts"] == 1
+
+
+def test_check_reminders_skips_disabled_alert(engine):
+    _watch(engine, alert=False)
+    with Session(engine) as session:
+        result = check_reminders(session, now=_et(10, 0))
+    assert result["alerts"] == 0
+
+
+def test_check_reminders_formats_groups_and_cooldown(engine, monkeypatch):
+    sent = {}
+    import notifier.telegram as telegram
+
+    monkeypatch.setattr(
+        telegram, "notify", lambda message: sent.setdefault("text", message) and True
+    )
+    _watch(engine, "SPCX", "US", price=125.0, target=132.0, name="SpaceX")
+    _watch(engine, "BTC", "CRYPTO", price=90000.0, target=95000.0, name="Bitcoin")
+    with Session(engine) as session:
+        result = check_reminders(session, now=_et(10, 0))
+    assert result["notified"] is True
+    text = sent["text"]
+    assert text.startswith("🔔 关注价提醒")
+    assert "【美股】" in text and "【加密】" in text
+    assert "- SpaceX 现价 125.00 ≤ 关注价 132.00" in text
+    assert "每 2 小时最多提醒一次" in text
+
+
+def test_reminder_name_trims_share_class_suffix():
+    from debrief.worker import _reminder_name
+
+    class Item:
+        name = "Duolingo, Inc. - Class A Common Stock"
+        ticker = "DUOL"
+
+    assert _reminder_name(Item()) == "Duolingo, Inc."

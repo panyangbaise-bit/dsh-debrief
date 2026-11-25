@@ -359,7 +359,7 @@ debrief migrate --json
 debrief worker [--dry-run] [--json]
 ```
 
-- APScheduler 常驻数据采集（**无任何 LLM 调用**）：`prices`（**`*/30 * * * *` 全天每 30 分钟，Asia/Shanghai**，覆盖美股盘后 21:30–04:00、港股尾盘、A 股与加密全天；可用 `PRICES_CRONTAB` 环境变量或 `data/scheduler_settings.json` 的 `prices_crontab` 键覆盖）、`news`（NEWS_CRONTAB，默认 0 8-22/2；采集后若 `TELEGRAM_NEWS_PUSH=true`（**默认 false**，原始条目会与技能侧摘要重复）且已配置 Telegram，推送最多 6 条新标题摘要，返回 `{"fetched","saved","notified"}`）、`catalog-sync`（每日 06:10，akshare 列表 + CoinGecko /coins/list）、`reminders`（*/15 提醒比对 + Telegram 通知）、`cleanup`（每日 03:00，`JOB_RUN_RETENTION_DAYS=365` 分批 DELETE + incremental_vacuum）。
+- APScheduler 常驻数据采集（**无任何 LLM 调用**）：`prices`（**`*/30 * * * *` 全天每 30 分钟，Asia/Shanghai**，覆盖美股盘后 21:30–04:00、港股尾盘、A 股与加密全天；可用 `PRICES_CRONTAB` 环境变量或 `data/scheduler_settings.json` 的 `prices_crontab` 键覆盖）、`news`（NEWS_CRONTAB，默认 0 8-22/2；采集后若 `TELEGRAM_NEWS_PUSH=true`（**默认 false**，原始条目会与技能侧摘要重复）且已配置 Telegram，推送最多 6 条新标题摘要，返回 `{"fetched","saved","notified"}`）、`catalog-sync`（每日 06:10，akshare 列表 + CoinGecko /coins/list）、`reminders`（*/15 比对关注价；**仅在各标的所属市场的常规交易时段内**推送（美股 09:30–16:00 ET / A股 09:30–11:30、13:00–15:00 / 港股 09:30–12:00、13:00–16:00 / 加密 24/7，周末不推），同一标的冷却 `REMINDER_COOLDOWN_MINUTES`（默认 120 分钟），价格回到关注价外侧后再次触及时立即提醒）、`cleanup`（每日 03:00，`JOB_RUN_RETENTION_DAYS=365` 分批 DELETE + incremental_vacuum）。
 - 上游故障不崩溃：每次运行写 `job_runs`（succeeded / failed + `DEBRIEF_UPSTREAM_*` 错误码）。
 - `--dry-run` 打印排程并退出。
 

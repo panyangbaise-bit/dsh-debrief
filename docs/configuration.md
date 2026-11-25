@@ -64,6 +64,7 @@
 | `TELEGRAM_NEWS_PUSH`   | 新闻**原始条目**推送开关（默认关闭；摘要由定时技能经 `debrief_telegram` 推送）。设 `true` 恢复内核推送，仅在已配置时生效。 |
 | `TELEGRAM_REPORT_PUSH` | 复盘报告**原始摘要**推送开关（默认关闭；精简摘要由定时技能经 `debrief_telegram` 推送）。设 `true` 恢复内核推送，仅在已配置时生效。 |
 | `PRICE_STALE_SECONDS`  | 行情缓存视为过期的秒数（默认 120）；读侧超过此时长即实时刷新。     |
+| `REMINDER_COOLDOWN_MINUTES` | 关注价提醒冷却分钟数（默认 120）：标的持续处于关注价内时，每个冷却窗口最多推送一次。 |
 | `DEBRIEF_FX_<CCY>`     | 汇率离线兜底：每 1 CNY 兑换多少 `CCY`（如 `DEBRIEF_FX_USD=7.2`）。 |
 
 ## 实时行情 / 汇率 / Telegram
@@ -77,6 +78,10 @@
   推送（内核 worker 的原始新闻推送与 `report create` 的原始报告推送默认关闭，避免与
   技能侧 digest 重复、且保证来源链接可点击）；可用 `debrief notify status` 查看状态、
   `notify test` 发送测试消息（未配置返回 `DEBRIEF_TELEGRAM_UNCONFIGURED`）。
+- **关注价提醒**：worker 每 15 分钟比对一次，但**只在该标的所属市场的常规交易时段内**
+  推送（US 09:30–16:00 ET / CN 09:30–11:30、13:00–15:00 / HK 09:30–12:00、13:00–16:00 /
+  加密 24/7；周末不推，节假日暂未建模），同一标的每 `REMINDER_COOLDOWN_MINUTES`
+  （默认 2 小时）最多一次；价格回到关注价外侧后再次触及会立即提醒。
 
 ## UI 相关说明
 
@@ -128,6 +133,7 @@ patch belongs to the user.
 | `TELEGRAM_NEWS_PUSH`   | Raw news-item pushes (off by default; digests are pushed by the scheduled skills via `debrief_telegram`). Set `true` to re-enable.   |
 | `TELEGRAM_REPORT_PUSH` | Raw report-summary pushes (off by default; digests are pushed by the scheduled skills via `debrief_telegram`). Set `true` to re-enable. |
 | `PRICE_STALE_SECONDS`  | Seconds after which cached quotes count as stale (default 120); read commands refresh live beyond it. |
+| `REMINDER_COOLDOWN_MINUTES` | Watchlist reminder cooldown in minutes (default 120): at most one push per instrument per window while the target zone stays hit. |
 | `DEBRIEF_FX_<CCY>`     | Offline FX fallback: `<CCY>` units per 1 CNY (e.g. `DEBRIEF_FX_USD=7.2`).                             |
 
 ## Live quotes / FX / Telegram
@@ -144,6 +150,12 @@ patch belongs to the user.
   `report create` push are off by default so they cannot duplicate the skill
   digest or lose clickable source links). Check with `debrief notify status`,
   test with `notify test` (unconfigured → `DEBRIEF_TELEGRAM_UNCONFIGURED`).
+- **Price-target reminders**: the worker compares every 15 minutes but only
+  pushes inside the instrument's regular session (US 09:30–16:00 ET / CN
+  09:30–11:30, 13:00–15:00 / HK 09:30–12:00, 13:00–16:00 / crypto 24/7; no
+  weekends, exchange holidays not modelled yet), at most once per
+  `REMINDER_COOLDOWN_MINUTES` (default 2h) while the target zone stays hit;
+  re-crossing after leaving the zone alerts immediately.
 
 ## UI notes
 

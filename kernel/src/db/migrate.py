@@ -510,6 +510,26 @@ def _migrate_v15_catalog_asset_class(conn: Connection) -> None:
     conn.execute(text("DROP TABLE instrument_catalog_legacy"))
 
 
+def _migrate_v18_watchlist_alert_state(conn: Connection) -> None:
+    """watchlist_items: persist reminder cooldown/edge state across restarts.
+
+    The worker's `reminders` job needs to remember when it last pushed a target
+    hit, and whether the target zone was already hit on the previous check, so
+    it can throttle repeats to the cooldown window without losing the
+    edge-triggered "fresh cross alerts immediately" behaviour.
+    """
+    _guarded_alter(
+        "ALTER TABLE watchlist_items ADD COLUMN last_alert_at DATETIME",
+        "watchlist_items",
+        "last_alert_at",
+    )(conn)
+    _guarded_alter(
+        "ALTER TABLE watchlist_items ADD COLUMN alert_active INTEGER NOT NULL DEFAULT 0",
+        "watchlist_items",
+        "alert_active",
+    )(conn)
+
+
 MIGRATIONS = [
     # Each entry: (version, sql_statement | callable)
     # Version 1: add name column to holdings (added 2026-07-18)
@@ -612,6 +632,7 @@ MIGRATIONS = [
     ("v15_catalog_asset_class", _migrate_v15_catalog_asset_class),
     ("v16_ltm_retired_at", _migrate_v16_ltm_retired_at),
     ("v17_memory_profile", _migrate_v17_memory_profile),
+    ("v18_watchlist_alert_state", _migrate_v18_watchlist_alert_state),
 ]
 
 

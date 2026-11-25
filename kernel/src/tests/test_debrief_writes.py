@@ -395,3 +395,26 @@ def test_writes_are_read_back_by_cli(seeded_db, run_cli):
     code, payload = run_cli(["--db", str(seeded_db), "holdings", "add", "--json"], stdin=stdin)
     assert code == 1
     assert payload["error"]["code"] == "DEBRIEF_CONFLICT"
+
+
+def test_watchlist_update_resets_reminder_state(db):
+    """Editing target/alert must re-arm the reminder (fresh cross alerts now)."""
+    from datetime import datetime, timezone
+
+    from debrief import commands
+
+    with Session(db) as session:
+        commands.cmd_watchlist_add(
+            session, {"market": "us", "symbol": "SPCX", "targetPrice": 132.0}
+        )
+        item = session.scalars(select(WatchlistItem)).one()
+        item.alert_active = 1
+        item.last_alert_at = datetime.now(timezone.utc)
+        session.commit()
+    with Session(db) as session:
+        commands.cmd_watchlist_update(session, {"market": "us", "symbol": "SPCX", "targetPrice": 130.0})
+    with Session(db) as session:
+        item = session.scalars(select(WatchlistItem)).one()
+        assert item.target_price_low == 130.0
+        assert item.alert_active == 0
+        assert item.last_alert_at is None
