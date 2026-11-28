@@ -16,7 +16,17 @@ from debrief.errors import KernelError
 # stores US|CN|HK|CRYPTO, and the JSON schema renders crypto as CC (as the
 # plugin mock does).
 MARKET_INPUT_TO_DB = {"US": "US", "CN": "CN", "HK": "HK", "CRYPTO": "CRYPTO", "CC": "CRYPTO"}
-MARKET_DB_TO_OUTPUT = {"US": "US", "CN": "CN", "HK": "HK", "CRYPTO": "CC"}
+# Reports additionally cover the weekly/monthly reviews; holdings/watchlist/
+# analysis keep the traded-market contract only (see normalize_report_market_db).
+REVIEW_MARKET_DB = {"WEEKLY": "WEEKLY", "MONTHLY": "MONTHLY"}
+MARKET_DB_TO_OUTPUT = {
+    "US": "US",
+    "CN": "CN",
+    "HK": "HK",
+    "CRYPTO": "CC",
+    "WEEKLY": "weekly",
+    "MONTHLY": "monthly",
+}
 
 MARKET_LABELS = {"US": "美股", "CN": "A股", "HK": "港股", "CC": "加密"}
 
@@ -32,6 +42,27 @@ def normalize_market_db(value: str) -> str:
 
 def market_to_output(value: str) -> str:
     return MARKET_DB_TO_OUTPUT.get((value or "").strip().upper(), (value or "").strip().upper())
+
+
+def normalize_report_market_db(value: str) -> str:
+    """Normalize a *report* market: traded markets plus weekly/monthly reviews.
+
+    The scheduled debrief-weekly / debrief-monthly skills write their review
+    into the report center with ``market=weekly|monthly``; those rows live in
+    `analysis_reports` next to the per-market after-market reports. Only the
+    report commands accept these values — holdings/watchlist/analysis stay
+    restricted to the traded markets.
+    """
+    raw = (value or "").strip().upper()
+    if raw in REVIEW_MARKET_DB:
+        return REVIEW_MARKET_DB[raw]
+    try:
+        return normalize_market_db(raw)
+    except KernelError as exc:
+        raise KernelError(
+            "DEBRIEF_ARGS",
+            f"invalid report market '{value}'; expected one of us, cn, hk, crypto, weekly, monthly",
+        ) from exc
 
 
 def resolve_db_path(db_arg: Optional[str] = None) -> Path:

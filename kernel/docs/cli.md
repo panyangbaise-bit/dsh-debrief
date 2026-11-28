@@ -180,6 +180,10 @@ echo '{"market":"us","title":"盘后分析","summary":"…","fullText":"…","me
 ```
 
 - 必需：`market/title/summary`；可选 `fullText/metrics[]/chart/jobId`。
+- `market` 取值：`us|cn|hk|crypto`（各市场盘后报告）+ `weekly|monthly`（周/月复盘）；
+  `report latest --market` / `report list --market` 同样接受这六个值，复盘行的 `market`
+  输出为小写 `weekly`/`monthly`。持仓/自选/盘后 `analysis prepare` 仍只接受四个交易市场
+  （`weekly`/`monthly` 只属于报告中心）。
 - 落 `analysis_reports` + `analysis_charts`（`chart_id` 关联）；写 `user_actions` 审计（`report.create`）。
 - 带 `jobId`：对应 `job_runs` 置 `succeeded` 并回填 `report_id`（返回 `status:"succeeded"`）；job 不存在 → `DEBRIEF_NOT_FOUND`。
 - 返回新增 `notified`（bool）：`TELEGRAM_REPORT_PUSH=true`（**默认 false**）且 Telegram 已配置时，向 chat 推送 `📋 复盘报告 · <market>` 原始摘要；推送失败/未配置均为 false，不影响落库。默认关闭：定时技能（盘后/周/月复盘）已用 `debrief notify send` 推送精简摘要，内核再推会重复。

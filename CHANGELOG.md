@@ -75,6 +75,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   URL 中的 `_`（如 `wallstreetcn.com/articles/abc_def`）不再被转成 `<i>` 而让 `<a href>`
   失效（引用不可点击）；`<code>` / `<pre>` 内的内容也不再被强调或链接化；
   报告/记忆里的 `[[cite:doc:<id>]]` 在 Telegram 中渲染为可读的 `记忆#<id>`。
+- **周/月复盘报告写回失败（`DEBRIEF_ARGS`）** — 内核 `report create/latest/list` 的 market
+  归一化此前只接受 `us|cn|hk|crypto`，而 `debrief-weekly` / `debrief-monthly` 技能按设计
+  写 `market=weekly|monthly`，导致周复盘连续多周「报告中心写回失败」且从未落库。
+  报告命令现在接受六个值（`weekly`/`monthly` 读回小写），持仓/自选/盘后 `analysis prepare`
+  仍只接受四个交易市场。
 
 ### Changed
 

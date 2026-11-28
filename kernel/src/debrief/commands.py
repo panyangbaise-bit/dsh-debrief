@@ -25,7 +25,13 @@ from db.models import (
     WatchlistItem,
 )
 from debrief import catalog
-from debrief.context import MARKET_LABELS, display_now, market_to_output, normalize_market_db
+from debrief.context import (
+    MARKET_LABELS,
+    display_now,
+    market_to_output,
+    normalize_market_db,
+    normalize_report_market_db,
+)
 from debrief.errors import KernelError, UsageError, require_string
 from debrief.kernel import (
     build_dashboard_payload,
@@ -304,7 +310,7 @@ def cmd_report_latest(session: Session, market: Optional[str]) -> dict:
         desc(AnalysisReport.generated_at), desc(AnalysisReport.id)
     )
     if market:
-        market_db = normalize_market_db(market)
+        market_db = normalize_report_market_db(market)
         query = query.filter(AnalysisReport.market == market_db)
     report = query.first()
     if report is None:
@@ -333,7 +339,7 @@ def cmd_report_list(
         desc(AnalysisReport.generated_at), desc(AnalysisReport.id)
     )
     if market:
-        query = query.filter(AnalysisReport.market == normalize_market_db(market))
+        query = query.filter(AnalysisReport.market == normalize_report_market_db(market))
     if since is not None:
         query = query.filter(AnalysisReport.generated_at >= since)
     if until is not None:
@@ -357,7 +363,7 @@ def cmd_report_list(
 def cmd_report_create(session: Session, payload: dict) -> dict:
     from db.repository import finish_job_run, record_user_action
 
-    market_db = normalize_market_db(require_string(payload, "market") or "")
+    market_db = normalize_report_market_db(require_string(payload, "market") or "")
     title = require_string(payload, "title") or ""
     summary = require_string(payload, "summary") or ""
     full_text = payload.get("fullText")

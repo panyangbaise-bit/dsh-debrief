@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "portfolio-agent-kernel"
-version = "0.6.6"
+version = "0.6.7"
 description = "debrief data kernel: SQLite portfolio ledger, collection worker, and JSON CLI (no agent, no LLM)"
 requires-python = ">=3.11"
 # Core = everything the debrief CLI needs for read/write commands. Collector

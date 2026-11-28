@@ -352,3 +352,45 @@ def test_migrate_command_idempotent(seeded_db, run_cli):
     assert code == 0
     assert payload["data"]["applied"] == []  # already migrated by open_engine
     assert payload["data"]["totalMigrations"] >= 16
+
+
+def test_report_weekly_and_monthly_review_markets(seeded_db, run_cli):
+    """debrief-weekly / debrief-monthly write market=weekly|monthly reviews."""
+    for market in ("weekly", "monthly"):
+        code, payload = run_cli(
+            ["--db", str(seeded_db), "report", "create", "--json"],
+            stdin=json.dumps(
+                {"market": market, "title": f"{market} 复盘", "summary": "本周结论"},
+                ensure_ascii=False,
+            ),
+        )
+        assert code == 0, payload
+        assert payload["data"]["id"].endswith(f"-{market}")
+
+    code, latest = run_cli(["--db", str(seeded_db), "report", "latest", "--market", "weekly"])
+    assert code == 0
+    assert latest["data"]["market"] == "weekly"
+    assert latest["data"]["title"] == "weekly 复盘"
+
+    code, listed = run_cli(["--db", str(seeded_db), "report", "list", "--market", "MONTHLY"])
+    assert code == 0
+    assert [item["market"] for item in listed["data"]["items"]] == ["monthly"]
+    assert listed["data"]["count"] == 1
+
+
+def test_report_market_rejects_unknown_and_reviews_stay_report_only(seeded_db, run_cli):
+    code, payload = run_cli(
+        ["--db", str(seeded_db), "report", "create", "--json"],
+        stdin=json.dumps({"market": "yearly", "title": "t", "summary": "s"}),
+    )
+    assert code != 0
+    assert payload["error"]["code"] == "DEBRIEF_ARGS"
+    assert "weekly, monthly" in payload["error"]["message"]
+
+    # Holdings keep the traded-market contract: weekly is a report-only value.
+    code, payload = run_cli(
+        ["--db", str(seeded_db), "holdings", "add", "--json"],
+        stdin=json.dumps({"market": "weekly", "symbol": "X", "quantity": 1, "cost": 1}),
+    )
+    assert code != 0
+    assert payload["error"]["code"] == "DEBRIEF_ARGS"
